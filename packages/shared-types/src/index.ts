@@ -165,6 +165,12 @@ export interface WatchedClass {
   is_active: boolean;
 }
 
+export interface AvailableClass {
+  gpu_name: string;
+  num_gpus: number;
+  supply_count: number | null;
+}
+
 export interface ProjectionPoint {
   label: 'p25' | 'p50' | 'p75';
   price_gpu: number;

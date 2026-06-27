@@ -160,6 +160,12 @@ class ObserverStatus(BaseModel):
     poll_interval_seconds: int
 
 
+class AvailableClass(BaseModel):
+    gpu_name: str
+    num_gpus: int
+    supply_count: int | None
+
+
 # ── Simulator ──────────────────────────────────────────────────
 class SimulatedHostIn(BaseModel):
     name: str | None = None

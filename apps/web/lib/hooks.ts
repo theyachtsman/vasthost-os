@@ -1,5 +1,6 @@
 import {
   type AccountStatus,
+  type AvailableClass,
   type ClearingEvent,
   type DailyEarningPoint,
   type Distribution,
@@ -129,6 +130,13 @@ export const useObserverStatus = () =>
     queryKey: ['observer-status'],
     queryFn: () => api.get<ObserverStatus>('/market/observer/status'),
     refetchInterval: 30_000,
+  });
+
+export const useAvailableClasses = () =>
+  useQuery({
+    queryKey: ['available-classes'],
+    queryFn: () => api.get<AvailableClass[]>('/market/available-classes'),
+    refetchInterval: 60_000,
   });
 
 // ── Watched classes ────────────────────────────────────────────

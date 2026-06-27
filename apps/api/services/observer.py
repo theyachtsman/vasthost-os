@@ -12,7 +12,7 @@ rental ("clearing event"). Dwell time is measured from the offer's first sightin
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -110,8 +110,13 @@ def discover_classes(db: Session) -> int:
 
 
 def market_observer_poll(db: Session) -> int:
-    """Poll search offers for each watched class. Write snapshots + detect
-    clearing events. Returns number of snapshots written."""
+    """Poll search offers for each watched GPU class, across ALL config sizes.
+
+    We query per gpu_name *without* a num_gpus filter, so a single call returns
+    every offer size (×1, ×2, ×4, ×8, …). Each snapshot records its own
+    num_gpus, and aggregation buckets by (gpu_name, num_gpus). Returns the number
+    of snapshots written.
+    """
     client = _observer_client(db)
     if client is None:
         logger.info("observer: no active account/key yet — skipping poll")
@@ -122,17 +127,16 @@ def market_observer_poll(db: Session) -> int:
         logger.info("observer: no watched classes configured — skipping poll")
         return 0
 
+    gpu_names = sorted({wc.gpu_name for wc in watched})
     now = datetime.now(UTC)
     written = 0
 
-    for wc in watched:
-        query = f"gpu_name={wc.gpu_name.replace(' ', '_')} num_gpus={wc.num_gpus}"
-        if wc.geolocation:
-            query += f" geolocation={wc.geolocation}"
+    for name in gpu_names:
+        query = f"gpu_name={name.replace(' ', '_')}"
         try:
-            offers = client.search_offers(query=query, limit=1000)
+            offers = client.search_offers(query=query, limit=2000)
         except Exception as exc:  # noqa: BLE001
-            logger.error("observer poll failed for %s: %s", query, exc)
+            logger.error("observer poll failed for %s: %s", name, exc)
             continue
 
         seen_offer_ids = set()
@@ -141,19 +145,25 @@ def market_observer_poll(db: Session) -> int:
             if offer_id is None:
                 continue
             seen_offer_ids.add(int(offer_id))
+            # Vast's dph_base is the TOTAL offer price (scales linearly with
+            # num_gpus). Normalise to per-GPU so all config-size buckets are
+            # directly comparable; dph_total keeps the renter-pays total.
+            num = o.get("num_gpus") or 1
+            dph_base = o.get("dph_base")
+            price_per_gpu = (dph_base / num) if (dph_base is not None and num) else dph_base
             db.add(
                 OfferSnapshot(
                     observed_at=now,
                     offer_id=int(offer_id),
                     machine_id=o.get("machine_id"),
-                    gpu_name=o.get("gpu_name") or wc.gpu_name,
+                    gpu_name=o.get("gpu_name") or name,
                     num_gpus=o.get("num_gpus"),
                     gpu_ram_mb=o.get("gpu_ram"),
                     gpu_max_power_w=o.get("gpu_max_power"),
                     reliability=o.get("reliability"),
                     verified=o.get("verified"),
                     geolocation=o.get("geolocation"),
-                    price_gpu=o.get("dph_base"),
+                    price_gpu=price_per_gpu,
                     price_disk=o.get("storage_cost"),
                     price_inetu=o.get("inet_up_cost"),
                     price_inetd=o.get("inet_down_cost"),
@@ -168,22 +178,25 @@ def market_observer_poll(db: Session) -> int:
             )
             written += 1
 
-        _detect_clearing(db, wc, seen_offer_ids, now)
+        _detect_clearing(db, name, seen_offer_ids, now)
 
     db.commit()
-    logger.info("observer: wrote %s offer snapshots across %s classes", written, len(watched))
+    logger.info(
+        "observer: wrote %s snapshots across %s GPU classes (all sizes)", written, len(gpu_names)
+    )
     return written
 
 
 def _detect_clearing(
-    db: Session, wc: WatchedClass, current_offer_ids: set[int], now: datetime
+    db: Session, gpu_name: str, current_offer_ids: set[int], now: datetime
 ) -> None:
-    """Compare the previous poll's available offers against this poll's."""
+    """Compare the previous poll's available offers (this gpu_name, any size)
+    against this poll's. A vanished offer is a probable rental; its own num_gpus
+    is recorded on the event."""
     prev_poll_at = db.scalar(
         select(func.max(OfferSnapshot.observed_at)).where(
             OfferSnapshot.observed_at < now,
-            OfferSnapshot.gpu_name == wc.gpu_name,
-            OfferSnapshot.num_gpus == wc.num_gpus,
+            OfferSnapshot.gpu_name == gpu_name,
         )
     )
     if prev_poll_at is None:
@@ -192,8 +205,7 @@ def _detect_clearing(
     prev_available = db.scalars(
         select(OfferSnapshot).where(
             OfferSnapshot.observed_at == prev_poll_at,
-            OfferSnapshot.gpu_name == wc.gpu_name,
-            OfferSnapshot.num_gpus == wc.num_gpus,
+            OfferSnapshot.gpu_name == gpu_name,
             OfferSnapshot.rentable.is_(True),
             OfferSnapshot.rented.is_(False),
         )
@@ -237,16 +249,18 @@ def _detect_clearing(
 
 
 def market_distribution_aggregate(db: Session) -> int:
-    """Aggregate the latest snapshot per watched bucket into a distribution row."""
+    """Aggregate the latest poll per watched GPU class into one distribution row
+    per (gpu_name, num_gpus) bucket — so every config size with supply (×1, ×2,
+    ×4, ×8, …) gets its own distribution."""
     watched = _watched(db)
+    gpu_names = sorted({wc.gpu_name for wc in watched})
     now = datetime.now(UTC)
     produced = 0
 
-    for wc in watched:
+    for name in gpu_names:
         latest_poll = db.scalar(
             select(func.max(OfferSnapshot.observed_at)).where(
-                OfferSnapshot.gpu_name == wc.gpu_name,
-                OfferSnapshot.num_gpus == wc.num_gpus,
+                OfferSnapshot.gpu_name == name,
             )
         )
         if latest_poll is None:
@@ -256,65 +270,69 @@ def market_distribution_aggregate(db: Session) -> int:
             db.scalars(
                 select(OfferSnapshot).where(
                     OfferSnapshot.observed_at == latest_poll,
-                    OfferSnapshot.gpu_name == wc.gpu_name,
-                    OfferSnapshot.num_gpus == wc.num_gpus,
+                    OfferSnapshot.gpu_name == name,
                 )
             )
         )
         if not snaps:
             continue
 
-        prices = sorted(float(s.price_gpu) for s in snaps if s.price_gpu is not None)
-        supply = len(snaps)
-        rented = sum(1 for s in snaps if s.rented)
-        util = round(100.0 * rented / supply, 2) if supply else None
+        # Bucket by config size.
+        buckets: dict[int, list] = {}
+        for s in snaps:
+            if s.num_gpus is None:
+                continue
+            buckets.setdefault(s.num_gpus, []).append(s)
 
-        clearing_1h = _clearing_rate(db, wc, now, hours=1)
-        clearing_24h = _clearing_rate(db, wc, now, hours=24)
+        for num_gpus, group in buckets.items():
+            prices = sorted(float(s.price_gpu) for s in group if s.price_gpu is not None)
+            supply = len(group)
+            rented = sum(1 for s in group if s.rented)
+            util = round(100.0 * rented / supply, 2) if supply else None
 
-        db.add(
-            MarketDistribution(
-                computed_at=now,
-                gpu_name=wc.gpu_name,
-                num_gpus=wc.num_gpus,
-                verified=None,
-                geolocation=wc.geolocation,
-                p10_price=percentile(prices, 10),
-                p25_price=percentile(prices, 25),
-                p50_price=percentile(prices, 50),
-                p75_price=percentile(prices, 75),
-                p90_price=percentile(prices, 90),
-                supply_count=supply,
-                rented_count=rented,
-                utilization_pct=util,
-                clearing_rate_1h=clearing_1h,
-                clearing_rate_24h=clearing_24h,
+            db.add(
+                MarketDistribution(
+                    computed_at=now,
+                    gpu_name=name,
+                    num_gpus=num_gpus,
+                    verified=None,
+                    geolocation=None,
+                    p10_price=percentile(prices, 10),
+                    p25_price=percentile(prices, 25),
+                    p50_price=percentile(prices, 50),
+                    p75_price=percentile(prices, 75),
+                    p90_price=percentile(prices, 90),
+                    supply_count=supply,
+                    rented_count=rented,
+                    utilization_pct=util,
+                    clearing_rate_1h=_clearing_rate(db, name, num_gpus, now, hours=1),
+                    clearing_rate_24h=_clearing_rate(db, name, num_gpus, now, hours=24),
+                )
             )
-        )
-        produced += 1
+            produced += 1
 
     db.commit()
-    logger.info("observer: produced %s distribution rows", produced)
+    logger.info("observer: produced %s distribution rows (per size bucket)", produced)
     return produced
 
 
-def _clearing_rate(db: Session, wc: WatchedClass, now: datetime, hours: int) -> float | None:
+def _clearing_rate(
+    db: Session, gpu_name: str, num_gpus: int, now: datetime, hours: int
+) -> float | None:
     """Clearing events per supply unit over the window (rough demand proxy)."""
-    from datetime import timedelta
-
     window_start = now - timedelta(hours=hours)
     events = db.scalar(
         select(func.count(ClearingEvent.id)).where(
             ClearingEvent.detected_at >= window_start,
-            ClearingEvent.gpu_name == wc.gpu_name,
-            ClearingEvent.num_gpus == wc.num_gpus,
+            ClearingEvent.gpu_name == gpu_name,
+            ClearingEvent.num_gpus == num_gpus,
         )
     )
     avg_supply = db.scalar(
         select(func.avg(MarketDistribution.supply_count)).where(
             MarketDistribution.computed_at >= window_start,
-            MarketDistribution.gpu_name == wc.gpu_name,
-            MarketDistribution.num_gpus == wc.num_gpus,
+            MarketDistribution.gpu_name == gpu_name,
+            MarketDistribution.num_gpus == num_gpus,
         )
     )
     if not avg_supply:

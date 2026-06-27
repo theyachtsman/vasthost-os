@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 from db.session import get_db
 from models import ClearingEvent, MarketDistribution, OfferSnapshot, WatchedClass
 from schemas.models import (
+    AvailableClass,
     ClearingEventOut,
     DistributionOut,
     ObserverStatus,
@@ -89,6 +91,28 @@ def observer_status(db: Session = Depends(get_db)) -> ObserverStatus:
         watched_classes=watched,
         poll_interval_seconds=POLL_INTERVAL_SECONDS,
     )
+
+
+@router.get("/available-classes", response_model=list[AvailableClass])
+def available_classes(db: Session = Depends(get_db)) -> list[AvailableClass]:
+    """Distinct (gpu_name, num_gpus) buckets that have a recent distribution —
+    drives the Market page's GPU + config-size selectors."""
+    since = datetime.now(UTC) - timedelta(minutes=90)
+    rows = db.scalars(
+        select(MarketDistribution)
+        .where(MarketDistribution.computed_at >= since)
+        .order_by(MarketDistribution.computed_at.desc())
+    )
+    seen: dict[tuple[str, int], int | None] = {}
+    for r in rows:
+        key = (r.gpu_name, r.num_gpus)
+        if key not in seen:
+            seen[key] = r.supply_count
+    out = [
+        AvailableClass(gpu_name=g, num_gpus=n, supply_count=s) for (g, n), s in seen.items()
+    ]
+    out.sort(key=lambda x: (x.gpu_name, x.num_gpus))
+    return out
 
 
 # ── Watched classes (drive the Observer; managed from Settings) ──
