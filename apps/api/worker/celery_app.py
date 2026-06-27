@@ -25,6 +25,10 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_max_tasks_per_child=200,
+    # The vastai SDK inspects sys.stdout.encoding on construction; Celery's
+    # default stdout/stderr redirection to a LoggingProxy (which has no
+    # .encoding) breaks that. Keep the real streams so Vast calls work in tasks.
+    worker_redirect_stdouts=False,
 )
 
 # Ensure task modules are imported so they register.

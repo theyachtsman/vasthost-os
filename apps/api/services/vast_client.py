@@ -67,6 +67,17 @@ class VastClient:
         self._api_key = api_key
         self._vast = VastAI(api_key=api_key)
 
+    def _redact(self, text: str) -> str:
+        """Never let the API key reach logs or stored error messages.
+
+        The Vast SDK embeds the key in request URLs, which surface in error
+        strings — scrub it (and any 64-hex token) before logging/persisting.
+        """
+        import re
+
+        scrubbed = text.replace(self._api_key, "***REDACTED***")
+        return re.sub(r"\b[0-9a-f]{48,64}\b", "***REDACTED***", scrubbed)
+
     @retry(
         retry=retry_if_exception_type(VastRateLimited),
         wait=wait_exponential_jitter(initial=2, max=60, jitter=2),
@@ -80,15 +91,16 @@ class VastClient:
         try:
             raw = fn(**kwargs)
         except Exception as exc:  # noqa: BLE001 - we classify below
+            msg = self._redact(str(exc))
             if _looks_like_rate_limit(exc):
                 wait = 2 + random.random() * 2
                 logger.warning(
                     "Vast 429 on %s — backing off ~%.1fs and retrying", method, wait
                 )
                 time.sleep(wait)
-                raise VastRateLimited(str(exc)) from exc
-            logger.error("Vast call %s failed: %s", method, exc)
-            raise VastClientError(str(exc)) from exc
+                raise VastRateLimited(msg) from None
+            logger.error("Vast call %s failed: %s", method, msg)
+            raise VastClientError(msg) from None
         return _coerce(raw)
 
     # ── Account ────────────────────────────────────────────────
@@ -96,10 +108,15 @@ class VastClient:
         """Validate the key and return account info."""
         return self._call("show_user")
 
-    def show_earnings(self, last_days: int = 90) -> dict[str, Any]:
-        """Daily-granularity earnings. SDK signatures vary across versions, so
-        try the documented kwarg, then fall back to a bare call."""
-        for kwargs in ({"last_days": last_days}, {}):
+    def show_earnings(self, last_days: int = 90) -> Any:
+        """Earnings (daily granularity). SDK 1.1.x exposes show_earnings(**kwargs)
+        and rejects ``last_days``; older builds accepted it. Try a couple of
+        signatures, then fall back to a bare call.
+
+        Note: 1.1.x may return a list rather than the documented dict — callers
+        normalise the shape.
+        """
+        for kwargs in ({}, {"start_date": None, "end_date": None}, {"last_days": last_days}):
             try:
                 return self._call("show_earnings", **kwargs)
             except VastClientError as exc:
