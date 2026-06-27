@@ -164,3 +164,32 @@ export interface WatchedClass {
   geolocation: string | null;
   is_active: boolean;
 }
+
+export interface ProjectionPoint {
+  label: 'p25' | 'p50' | 'p75';
+  price_gpu: number;
+  gross_per_hr: number;
+  kept_per_hr: number;
+  power_per_hr: number;
+  net_per_hr: number;
+  net_monthly_100: number;
+  net_monthly_70: number;
+  net_monthly_50: number;
+}
+
+export interface SimulatedHostMarketContext {
+  host_id: string;
+  gpu_name: string | null;
+  num_gpus: number | null;
+  market_bucket_num_gpus: number | null;
+  market_computed_at: string | null;
+  p25_price: number | null;
+  p50_price: number | null;
+  p75_price: number | null;
+  supply_count: number | null;
+  utilization_pct: number | null;
+  break_even_floor: number | null;
+  break_even_percentile: number | null;
+  has_market_data: boolean;
+  projections: ProjectionPoint[];
+}

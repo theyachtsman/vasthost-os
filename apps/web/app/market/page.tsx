@@ -1,6 +1,8 @@
 'use client';
 
+import type { ClearingEvent } from '@vasthost/shared-types';
 import { Badge, DataState } from '@vasthost/ui';
+import { useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -15,6 +17,7 @@ import {
 import { ClassSelector } from '@/components/class-selector';
 import { DistributionBar } from '@/components/distribution-bar';
 import { PageHeader } from '@/components/page-header';
+import { SortHeader, useSort } from '@/components/sort-header';
 import { Widget } from '@/components/widget';
 import { dph, num, pct, relativeTime } from '@/lib/format';
 import {
@@ -169,30 +172,95 @@ function SupplyDemandWidget({ cls }: { cls: { gpu_name: string; num_gpus: number
   );
 }
 
+type EventSortKey = 'gpu' | 'region' | 'price' | 'dwell' | 'confidence' | 'when';
+const CONFIDENCE_RANK = { LOW: 0, MEDIUM: 1, HIGH: 2 } as const;
+
 function ClearingEventsTable({ cls }: { cls: { gpu_name: string; num_gpus: number } }) {
   const events = useClearingEvents(cls.gpu_name, cls.num_gpus, 50);
+  const [confidence, setConfidence] = useState<'ALL' | 'HIGH' | 'MEDIUM' | 'LOW'>('ALL');
+  const [region, setRegion] = useState<string>('ALL');
+
+  const { state: sortState, sort } = useSort<ClearingEvent, EventSortKey>('when', 'desc', {
+    gpu: (e) => e.gpu_name,
+    region: (e) => e.geolocation,
+    price: (e) => e.last_price_gpu,
+    dwell: (e) => e.dwell_minutes,
+    confidence: (e) => CONFIDENCE_RANK[e.confidence],
+    when: (e) => new Date(e.detected_at).getTime(),
+  });
+
+  const regions = useMemo(() => {
+    const set = new Set<string>();
+    (events.data ?? []).forEach((e) => e.geolocation && set.add(e.geolocation));
+    return Array.from(set).sort();
+  }, [events.data]);
+
+  const filtered = useMemo(() => {
+    let rows = events.data ?? [];
+    if (confidence !== 'ALL') rows = rows.filter((e) => e.confidence === confidence);
+    if (region !== 'ALL') rows = rows.filter((e) => e.geolocation === region);
+    return sort(rows);
+  }, [events.data, confidence, region, sort]);
+
+  const selectCls =
+    'h-8 rounded-md border border-border bg-bg px-2 text-xs text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+
   return (
-    <Widget title="Recent Clearing Events">
+    <Widget
+      title="Recent Clearing Events"
+      action={
+        <div className="flex items-center gap-2">
+          <select
+            aria-label="Filter by confidence"
+            className={selectCls}
+            value={confidence}
+            onChange={(e) => setConfidence(e.target.value as typeof confidence)}
+          >
+            <option value="ALL">All confidence</option>
+            <option value="HIGH">High</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="LOW">Low</option>
+          </select>
+          <select
+            aria-label="Filter by region"
+            className={selectCls}
+            value={region}
+            onChange={(e) => setRegion(e.target.value)}
+          >
+            <option value="ALL">All regions</option>
+            {regions.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </div>
+      }
+    >
       <DataState
         isLoading={events.isLoading}
         isError={events.isError}
         error={events.error}
-        data={events.data}
+        data={filtered}
         onRetry={events.refetch}
         isEmpty={(d) => d.length === 0}
-        emptyMessage="No clearing events yet — the Observer flags these as offers disappear."
+        emptyMessage={
+          (events.data?.length ?? 0) > 0
+            ? 'No events match these filters.'
+            : 'No clearing events yet — the Observer flags these as offers disappear.'
+        }
       >
         {(rows) => (
           <div className="-mx-4 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border text-left text-[11px] uppercase text-muted">
-                  <th className="px-4 py-2 font-medium">GPU</th>
-                  <th className="px-4 py-2 font-medium">Cleared at</th>
-                  <th className="px-4 py-2 text-right font-medium">Price</th>
-                  <th className="px-4 py-2 text-right font-medium">Dwell</th>
-                  <th className="px-4 py-2 font-medium">Confidence</th>
-                  <th className="px-4 py-2 text-right font-medium">When</th>
+                <tr className="border-b border-border text-left text-[11px] uppercase">
+                  <SortHeader label="GPU" sortKey="gpu" state={sortState} />
+                  <SortHeader label="Region" sortKey="region" state={sortState} />
+                  <SortHeader label="Price" sortKey="price" state={sortState} align="right" />
+                  <SortHeader label="Dwell" sortKey="dwell" state={sortState} align="right" />
+                  <SortHeader label="Confidence" sortKey="confidence" state={sortState} />
+                  <SortHeader label="When" sortKey="when" state={sortState} align="right" />
                 </tr>
               </thead>
               <tbody>
@@ -218,6 +286,9 @@ function ClearingEventsTable({ cls }: { cls: { gpu_name: string; num_gpus: numbe
                 ))}
               </tbody>
             </table>
+            <div className="px-4 pt-2 text-[11px] text-muted">
+              {rows.length} event{rows.length === 1 ? '' : 's'} shown
+            </div>
           </div>
         )}
       </DataState>

@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/page-header';
 import { ReliabilityTrend } from '@/components/reliability-trend';
 import { Widget } from '@/components/widget';
 import { dph, gb, num, relativeTime, untilTime } from '@/lib/format';
-import { useDistribution, useMachine, useMachines } from '@/lib/hooks';
+import { useAccountStatus, useDistribution, useMachine, useMachines } from '@/lib/hooks';
 
 function statusOf(m: Machine): { label: string; variant: 'success' | 'warning' | 'muted' | 'danger' } {
   if (m.is_listed && !m.is_rentable) return { label: 'RENTED', variant: 'success' };
@@ -19,7 +19,13 @@ function statusOf(m: Machine): { label: string; variant: 'success' | 'warning' |
 
 export default function FleetPage() {
   const machines = useMachines();
+  const account = useAccountStatus();
   const [openId, setOpenId] = useState<string | null>(null);
+
+  const connected = account.data?.connected;
+  const emptyMessage = connected
+    ? `No host machines found on ${account.data?.email ?? 'this account'}. This Vast account has no listed machines yet — once you host (and the key has the machine_read permission), they appear here automatically.`
+    : 'Connect your Vast key in Settings to sync your fleet.';
 
   return (
     <div className="flex flex-col gap-4">
@@ -31,7 +37,7 @@ export default function FleetPage() {
         data={machines.data}
         onRetry={machines.refetch}
         isEmpty={(d) => d.length === 0}
-        emptyMessage="No machines yet — connect your Vast key in Settings."
+        emptyMessage={emptyMessage}
         skeleton={
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {[0, 1, 2].map((i) => (

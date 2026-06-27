@@ -181,6 +181,36 @@ class SimulatedHostOut(SimulatedHostIn, ORMModel):
     break_even_floor: float | None = None
 
 
+# ── Simulator × live market projection ─────────────────────────
+class ProjectionPoint(BaseModel):
+    label: str  # p25 | p50 | p75
+    price_gpu: float  # asking $/GPU-hr at this percentile
+    gross_per_hr: float  # asking × num_gpus
+    kept_per_hr: float  # after Vast service fee
+    power_per_hr: float
+    net_per_hr: float
+    net_monthly_100: float  # 730h @ 100% util
+    net_monthly_70: float
+    net_monthly_50: float
+
+
+class SimulatedHostMarketContext(BaseModel):
+    host_id: uuid.UUID
+    gpu_name: str | None
+    num_gpus: int | None
+    market_bucket_num_gpus: int | None  # which distribution bucket was used
+    market_computed_at: datetime | None
+    p25_price: float | None
+    p50_price: float | None
+    p75_price: float | None
+    supply_count: int | None
+    utilization_pct: float | None
+    break_even_floor: float | None
+    break_even_percentile: float | None  # where break-even sits in the market
+    has_market_data: bool
+    projections: list[ProjectionPoint]
+
+
 # ── Cost config ────────────────────────────────────────────────
 class CostConfigIn(BaseModel):
     machine_id: uuid.UUID

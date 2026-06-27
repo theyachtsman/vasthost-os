@@ -9,6 +9,7 @@ import {
   type MachineDetail,
   type ObserverStatus,
   type SimulatedHost,
+  type SimulatedHostMarketContext,
   type WatchedClass,
 } from '@vasthost/shared-types';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -179,3 +180,10 @@ export const useDeleteSimulatedHost = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['simulated-hosts'] }),
   });
 };
+
+export const useSimulatedHostMarket = (id: string) =>
+  useQuery({
+    queryKey: ['sim-market', id],
+    queryFn: () => api.get<SimulatedHostMarketContext>(`/simulator/hosts/${id}/market-context`),
+    refetchInterval: 60_000,
+  });

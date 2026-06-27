@@ -7,6 +7,7 @@ import { DistributionBar } from '@/components/distribution-bar';
 import { PageHeader } from '@/components/page-header';
 import { dph, num, pct, relativeTime, usd } from '@/lib/format';
 import {
+  useAccountStatus,
   useClearingEvents,
   useDistribution,
   useEarningsDaily,
@@ -59,6 +60,10 @@ function CardShell({
 
 function FleetOverviewCard() {
   const { data, isLoading, isError, error, refetch } = useMachines();
+  const account = useAccountStatus();
+  const emptyMessage = account.data?.connected
+    ? 'No host machines on this Vast account yet. Fleet fills in once you list machines (and the key has machine_read).'
+    : 'Connect your Vast key in Settings to sync your fleet.';
   return (
     <CardShell title="Fleet Overview" icon={Server}>
       <DataState
@@ -68,7 +73,7 @@ function FleetOverviewCard() {
         data={data}
         onRetry={refetch}
         isEmpty={(d) => d.length === 0}
-        emptyMessage="No machines yet — connect your Vast key in Settings."
+        emptyMessage={emptyMessage}
       >
         {(machines) => {
           const total = machines.length;

@@ -9,10 +9,11 @@ import { toast } from 'sonner';
 import { PageHeader } from '@/components/page-header';
 import { Widget } from '@/components/widget';
 import { breakEvenFloor } from '@/lib/calc';
-import { dph } from '@/lib/format';
+import { dph, num, pct, relativeTime, usd } from '@/lib/format';
 import {
   useDeleteSimulatedHost,
   useSaveSimulatedHost,
+  useSimulatedHostMarket,
   useSimulatedHosts,
 } from '@/lib/hooks';
 
@@ -166,6 +167,7 @@ export default function SimulatorPage() {
                         </Button>
                       </div>
                     </CardContent>
+                    <SimMarketPanel host={h} />
                   </Card>
                 ))}
               </div>
@@ -173,6 +175,116 @@ export default function SimulatorPage() {
           </DataState>
         </Widget>
       </div>
+    </div>
+  );
+}
+
+function SimMarketPanel({ host }: { host: SimulatedHost }) {
+  const ctx = useSimulatedHostMarket(host.id);
+
+  if (ctx.isLoading) {
+    return (
+      <div className="border-t border-border px-3 py-2 text-xs text-muted">
+        Loading live market…
+      </div>
+    );
+  }
+  if (ctx.isError || !ctx.data) {
+    return (
+      <div className="border-t border-border px-3 py-2 text-xs text-red-400">
+        Couldn’t load market context.
+      </div>
+    );
+  }
+
+  const d = ctx.data;
+  if (!d.has_market_data) {
+    return (
+      <div className="border-t border-border px-3 py-2 text-xs text-muted">
+        No market data for {d.gpu_name} yet — the Observer needs to aggregate a distribution
+        (every 15 min). Add it under Settings → Watched Classes.
+      </div>
+    );
+  }
+
+  const p50 = d.projections.find((p) => p.label === 'p50');
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border bg-bg/30 px-3 py-3">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted">
+          Live market · {d.gpu_name} ×{d.market_bucket_num_gpus}
+          {d.market_bucket_num_gpus !== d.num_gpus ? ' (per-GPU)' : ''}
+        </span>
+        <span className="text-[10px] text-muted">
+          updated {relativeTime(d.market_computed_at)}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-4 gap-2 text-center">
+        {(
+          [
+            ['p25', d.p25_price],
+            ['p50', d.p50_price],
+            ['p75', d.p75_price],
+          ] as const
+        ).map(([label, val]) => (
+          <div key={label} className="rounded-md border border-border bg-surface/60 py-1.5">
+            <div className="text-[10px] uppercase text-muted">{label}</div>
+            <div className="text-xs font-semibold tabular-nums text-fg">{dph(val)}</div>
+          </div>
+        ))}
+        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 py-1.5">
+          <div className="text-[10px] uppercase text-muted">break-even</div>
+          <div className="text-xs font-semibold tabular-nums text-emerald-400">
+            {dph(d.break_even_floor)}
+          </div>
+        </div>
+      </div>
+
+      <p className="text-[11px] text-muted">
+        Break-even sits at the{' '}
+        <span className="font-medium text-fg">
+          {d.break_even_percentile != null ? `${d.break_even_percentile.toFixed(0)}th` : '—'}
+        </span>{' '}
+        percentile of the market{d.supply_count != null ? ` (${num(d.supply_count)} offers` : ''}
+        {d.utilization_pct != null ? `, ${pct(d.utilization_pct)} utilized)` : d.supply_count != null ? ')' : ''}.
+      </p>
+
+      {p50 ? (
+        <div className="-mx-1 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[10px] uppercase text-muted">
+                <th className="px-1 py-1 text-left font-medium">Projected net @ p50</th>
+                <th className="px-1 py-1 text-right font-medium">100%</th>
+                <th className="px-1 py-1 text-right font-medium">70%</th>
+                <th className="px-1 py-1 text-right font-medium">50%</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="px-1 py-1 text-muted">
+                  {dph(p50.price_gpu)} × {d.num_gpus} GPU, after {pct(host.vast_service_fee_pct * 100, 0)} fee
+                </td>
+                <td className="px-1 py-1 text-right font-semibold tabular-nums text-fg">
+                  {usd(p50.net_monthly_100, 0)}/mo
+                </td>
+                <td className="px-1 py-1 text-right tabular-nums text-muted">
+                  {usd(p50.net_monthly_70, 0)}/mo
+                </td>
+                <td className="px-1 py-1 text-right tabular-nums text-muted">
+                  {usd(p50.net_monthly_50, 0)}/mo
+                </td>
+              </tr>
+              <tr className="text-[11px] text-muted">
+                <td className="px-1 pt-0.5">net/hr {usd(p50.net_per_hr)} (power {usd(p50.power_per_hr)}/hr)</td>
+                <td colSpan={3} />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : null}
     </div>
   );
 }
