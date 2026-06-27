@@ -6,9 +6,16 @@ import { useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
 import { ReliabilityTrend } from '@/components/reliability-trend';
+import { SimFleetCard } from '@/components/sim-fleet-card';
 import { Widget } from '@/components/widget';
 import { dph, gb, num, relativeTime, untilTime } from '@/lib/format';
-import { useAccountStatus, useDistribution, useMachine, useMachines } from '@/lib/hooks';
+import {
+  useAccountStatus,
+  useDistribution,
+  useMachine,
+  useMachines,
+  useSimulatedHosts,
+} from '@/lib/hooks';
 
 function statusOf(m: Machine): { label: string; variant: 'success' | 'warning' | 'muted' | 'danger' } {
   if (m.is_listed && !m.is_rentable) return { label: 'RENTED', variant: 'success' };
@@ -20,12 +27,37 @@ function statusOf(m: Machine): { label: string; variant: 'success' | 'warning' |
 export default function FleetPage() {
   const machines = useMachines();
   const account = useAccountStatus();
+  const simHosts = useSimulatedHosts();
   const [openId, setOpenId] = useState<string | null>(null);
 
   const connected = account.data?.connected;
   const emptyMessage = connected
     ? `No host machines found on ${account.data?.email ?? 'this account'}. This Vast account has no listed machines yet — once you host (and the key has the machine_read permission), they appear here automatically.`
     : 'Connect your Vast key in Settings to sync your fleet.';
+
+  // No real machines but simulated rigs exist → exercise the surface with them.
+  const noRealMachines = !machines.isLoading && (machines.data?.length ?? 0) === 0;
+  const sims = simHosts.data ?? [];
+  if (noRealMachines && sims.length > 0) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageHeader
+          title="Fleet Health"
+          description="Per-machine status, pricing, and reliability."
+        />
+        <div className="rounded-md border border-accent/30 bg-accent/5 px-4 py-2 text-xs text-muted">
+          No real machines connected — showing your <span className="text-accent">simulated
+          rigs</span> so you can exercise this surface. These switch to live machines
+          automatically once your Vast account has hosted machines.
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {sims.map((h) => (
+            <SimFleetCard key={h.id} host={h} />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">

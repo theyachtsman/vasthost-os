@@ -27,6 +27,11 @@ logger = logging.getLogger("vasthost.observer")
 
 POLL_INTERVAL_SECONDS = 180
 
+# Auto-discovery: a GPU class needs at least this many live single-GPU offers
+# to be auto-registered for watching (keeps the list bounded + low-noise).
+DISCOVERY_MIN_SUPPLY = 5
+DISCOVERY_SAMPLE_LIMIT = 5000
+
 
 def _ts(value) -> datetime | None:
     if value in (None, 0):
@@ -50,6 +55,58 @@ def _watched(db: Session) -> list[WatchedClass]:
         db.scalars(select(WatchedClass).where(WatchedClass.is_active.is_(True)))
     )
     return rows
+
+
+def discover_classes(db: Session) -> int:
+    """Auto-register GPU classes that currently have real supply on Vast.
+
+    Runs a single broad sweep, tallies single-GPU offers per gpu_name, and
+    upserts an active watched_class for each class above DISCOVERY_MIN_SUPPLY.
+    New GPU models appear automatically; thin/noise classes are skipped. We
+    never auto-delete — a host can prune in Settings — so manually-added
+    classes are preserved. Returns the number of newly-added classes.
+    """
+    client = _observer_client(db)
+    if client is None:
+        logger.info("discover: no active account/key yet — skipping")
+        return 0
+
+    try:
+        offers = client.search_offers(query="num_gpus=1", limit=DISCOVERY_SAMPLE_LIMIT)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("discover: broad sweep failed: %s", exc)
+        return 0
+
+    counts: dict[str, int] = {}
+    for o in offers:
+        name = o.get("gpu_name")
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+
+    existing = {
+        (wc.gpu_name, wc.num_gpus, wc.geolocation)
+        for wc in db.scalars(select(WatchedClass))
+    }
+    added = 0
+    for name, cnt in counts.items():
+        if cnt < DISCOVERY_MIN_SUPPLY:
+            continue
+        key = (name, 1, None)
+        if key in existing:
+            continue
+        db.add(WatchedClass(gpu_name=name, num_gpus=1, geolocation=None))
+        added += 1
+
+    if added:
+        db.commit()
+    logger.info(
+        "discover: sampled %s offers, %s classes ≥%s supply, %s newly added",
+        len(offers),
+        sum(1 for c in counts.values() if c >= DISCOVERY_MIN_SUPPLY),
+        DISCOVERY_MIN_SUPPLY,
+        added,
+    )
+    return added
 
 
 def market_observer_poll(db: Session) -> int:

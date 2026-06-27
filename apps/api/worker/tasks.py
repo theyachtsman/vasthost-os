@@ -38,6 +38,17 @@ def market_distribution_aggregate() -> int:
         db.close()
 
 
+@celery_app.task(name="worker.tasks.observer_discover")
+def observer_discover() -> int:
+    """Auto-register GPU classes with live supply so the watched list maintains
+    itself and picks up new GPU models automatically."""
+    db = SessionLocal()
+    try:
+        return observer_svc.discover_classes(db)
+    finally:
+        db.close()
+
+
 @celery_app.task(name="worker.tasks.fleet_sync")
 def fleet_sync() -> int:
     db = SessionLocal()

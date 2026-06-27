@@ -5,6 +5,7 @@ import { Activity, Cpu, Database, DollarSign, Radio, Server } from 'lucide-react
 
 import { DistributionBar } from '@/components/distribution-bar';
 import { PageHeader } from '@/components/page-header';
+import { simFleetSummary } from '@/components/sim-fleet-card';
 import { dph, num, pct, relativeTime, usd } from '@/lib/format';
 import {
   useAccountStatus,
@@ -15,6 +16,7 @@ import {
   useHealth,
   useMachines,
   useObserverStatus,
+  useSimulatedHosts,
 } from '@/lib/hooks';
 import { useClassStore } from '@/lib/store';
 
@@ -61,9 +63,31 @@ function CardShell({
 function FleetOverviewCard() {
   const { data, isLoading, isError, error, refetch } = useMachines();
   const account = useAccountStatus();
+  const simHosts = useSimulatedHosts();
   const emptyMessage = account.data?.connected
     ? 'No host machines on this Vast account yet. Fleet fills in once you list machines (and the key has machine_read).'
     : 'Connect your Vast key in Settings to sync your fleet.';
+
+  // No real machines but simulated rigs exist → summarise those instead.
+  const noReal = !isLoading && (data?.length ?? 0) === 0;
+  const sims = simHosts.data ?? [];
+  if (noReal && sims.length > 0) {
+    const { rigs, totalGpus } = simFleetSummary(sims);
+    return (
+      <CardShell title="Fleet Overview" icon={Server}>
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-4">
+            <Stat label="Simulated rigs" value={num(rigs)} />
+            <Stat label="GPUs" value={num(totalGpus)} sub="across test rigs" />
+          </div>
+          <Badge variant="accent" className="w-fit">
+            Simulated fleet
+          </Badge>
+        </div>
+      </CardShell>
+    );
+  }
+
   return (
     <CardShell title="Fleet Overview" icon={Server}>
       <DataState
