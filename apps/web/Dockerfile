@@ -6,20 +6,14 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 WORKDIR /repo
 
-# ── Install dependencies ───────────────────────────────────────
-FROM base AS deps
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
-COPY apps/web/package.json apps/web/package.json
-COPY packages/ui/package.json packages/ui/package.json
-COPY packages/shared-types/package.json packages/shared-types/package.json
-RUN pnpm install --no-frozen-lockfile
-
 # ── Build ──────────────────────────────────────────────────────
+# Install in the build stage so every workspace package (including
+# packages/ui and packages/shared-types) gets its node_modules — the web build
+# type-checks @vasthost/ui from source and needs React types resolvable there.
 FROM base AS build
-COPY --from=deps /repo/node_modules ./node_modules
-COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+RUN pnpm install --no-frozen-lockfile
 RUN pnpm --filter @vasthost/web build
 
 # ── Runtime ────────────────────────────────────────────────────
