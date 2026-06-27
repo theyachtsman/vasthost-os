@@ -116,6 +116,90 @@ Definition of Done, lives in [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md).
 
 ---
 
+## Quick start (one command)
+
+Prerequisites: Docker + Docker Compose v2.
+
+```bash
+# 1. Configure environment
+cp .env.example .env
+# Generate a SECRET_KEY (used to encrypt your stored Vast API key at rest):
+python3 -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(48))" >> .env
+#   …then edit .env and set that SECRET_KEY value (and optionally VAST_API_KEY).
+
+# 2. Bring up the full stack (db, redis, api, worker, beat, web)
+docker compose up -d
+
+# 3. Open the dashboard
+#    http://localhost:8111   (or http://<host-lan-ip>:8111 from another machine)
+```
+
+`docker compose up` starts Postgres + Redis, runs Alembic migrations
+automatically, launches the FastAPI API, the Celery worker + beat scheduler
+(the **Market Observer** begins polling immediately), and the Next.js dashboard
+on port **8111**.
+
+Check health through the proxy:
+
+```bash
+curl http://localhost:8111/api/health
+```
+
+### Connect your Vast account
+
+1. Open the dashboard → **Settings**.
+2. Paste your Vast.ai API key and click **Connect**. The key is validated
+   against Vast (`show_user`), stored **encrypted at rest**, and an initial
+   fleet + earnings sync kicks off — your machines and earnings appear within
+   ~60 seconds.
+3. Under **Observer — Watched GPU Classes**, add the `(gpu_name, num_gpus,
+   region)` tuples you want the Market Observer to track. The demand dataset
+   **cannot be backfilled**, so add the classes you care about early.
+
+### LAN access
+
+The dashboard is reachable from any machine on your network. See
+[`docs/lan-access.md`](docs/lan-access.md). One-time firewall step on the host:
+
+```bash
+sudo ufw allow 8111/tcp
+```
+
+### Local development (without Docker)
+
+```bash
+pnpm install                      # install JS workspace deps
+pnpm --filter @vasthost/web dev   # dashboard on 0.0.0.0:8111
+
+# API (separate shell) — needs a local Postgres + Redis and a populated .env
+cd apps/api
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload --port 8000
+celery -A worker.celery_app worker --loglevel=info   # worker
+celery -A worker.celery_app beat --loglevel=info     # beat scheduler
+```
+
+## Environment variables
+
+See [`.env.example`](.env.example) for the full reference. Key ones:
+
+| Variable | Purpose |
+|---|---|
+| `VAST_API_KEY` | Optional: validated on API startup; the primary key is set in-app via Settings |
+| `SECRET_KEY` | **Required.** Encrypts stored Vast API keys at rest |
+| `DATABASE_URL` | Postgres connection (SQLAlchemy + psycopg) |
+| `REDIS_URL` | Celery broker / result backend |
+| `API_INTERNAL_URL` | Internal API host the Next.js proxy forwards `/api/*` to |
+| `VAST_OBSERVER_DEFAULT_GPU` / `_NUM_GPUS` | Seeds the first watched class |
+| `ALLOW_ALL_CORS` | Dev flag — allow all origins on the API |
+| `WEB_PORT` | Host port the dashboard binds (default 8111) |
+
+---
+
 ## Status
 
-🚧 **Phase 0 — Foundation & Full Stack Bootstrap** (in progress)
+🚧 **Phase 0 — Foundation & Full Stack Bootstrap** — backend, workers, and all six
+surfaces built; web app and API verified building/importing cleanly. Full
+`docker compose up` smoke test pending on a Docker-enabled host.

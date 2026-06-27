@@ -1,0 +1,11 @@
+**/node_modules
+**/.next
+**/dist
+**/build
+**/.turbo
+**/__pycache__
+**/.venv
+**/venv
+.git
+.env
+*.log

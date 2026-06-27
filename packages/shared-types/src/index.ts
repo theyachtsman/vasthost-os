@@ -1,0 +1,166 @@
+// TypeScript types mirroring the FastAPI Phase 0 response schemas
+// (apps/api/schemas/models.py). Keep these in sync with the backend.
+
+export interface HealthComponent {
+  status: 'ok' | 'error';
+  detail?: string | null;
+}
+
+export interface HealthResponse {
+  status: 'healthy' | 'degraded';
+  components: Record<string, HealthComponent>;
+  time: string;
+}
+
+export interface AccountStatus {
+  connected: boolean;
+  vast_user_id?: number | null;
+  email?: string | null;
+  display_name?: string | null;
+  account_balance?: number | null;
+  last_synced_at?: string | null;
+  connected_at?: string | null;
+  api_key_masked?: string | null;
+}
+
+export interface Machine {
+  id: string;
+  machine_id: number;
+  gpu_name: string | null;
+  num_gpus: number | null;
+  gpu_ram_mb: number | null;
+  gpu_max_power_w: number | null;
+  cpu_name: string | null;
+  cpu_cores: number | null;
+  cpu_ram_mb: number | null;
+  disk_space_gb: number | null;
+  geolocation: string | null;
+  verified: string | null;
+  reliability: number | null;
+  is_listed: boolean | null;
+  is_rentable: boolean | null;
+  current_price_gpu: number | null;
+  min_bid_price: number | null;
+  offer_end_date: string | null;
+  last_seen_at: string | null;
+}
+
+export interface Contract {
+  id: string;
+  vast_contract_id: number | null;
+  rented_at: string | null;
+  ended_at: string | null;
+  locked_price_gpu: number | null;
+  rental_type: string | null;
+  num_gpus_rented: number | null;
+  status: string | null;
+}
+
+export interface ReliabilityPoint {
+  recorded_at: string;
+  reliability: number | null;
+  is_listed: boolean | null;
+  is_rentable: boolean | null;
+}
+
+export interface MachineDetail extends Machine {
+  contracts: Contract[];
+  reliability_history: ReliabilityPoint[];
+}
+
+export interface PerMachineEarning {
+  machine_id: string | null;
+  vast_machine_id: number | null;
+  gpu_name: string | null;
+  gpu_earn: number;
+  storage_earn: number;
+  bw_earn: number;
+  total_earn: number;
+  est_power_cost?: number | null;
+  net_margin?: number | null;
+}
+
+export interface EarningsSummary {
+  total_gpu: number;
+  total_storage: number;
+  total_bw: number;
+  total_all: number;
+  service_fee: number | null;
+  balance: number | null;
+  all_time_total: number;
+  per_machine: PerMachineEarning[];
+}
+
+export interface DailyEarningPoint {
+  earn_date: string;
+  gpu_earn: number;
+  storage_earn: number;
+  bw_earn: number;
+  total_earn: number;
+}
+
+export interface Distribution {
+  id: number;
+  computed_at: string;
+  gpu_name: string;
+  num_gpus: number;
+  verified: string | null;
+  geolocation: string | null;
+  p10_price: number | null;
+  p25_price: number | null;
+  p50_price: number | null;
+  p75_price: number | null;
+  p90_price: number | null;
+  supply_count: number | null;
+  rented_count: number | null;
+  utilization_pct: number | null;
+  clearing_rate_1h: number | null;
+  clearing_rate_24h: number | null;
+}
+
+export interface ClearingEvent {
+  id: number;
+  detected_at: string;
+  offer_id: number;
+  gpu_name: string | null;
+  num_gpus: number | null;
+  verified: string | null;
+  geolocation: string | null;
+  last_price_gpu: number | null;
+  dwell_minutes: number | null;
+  is_partial_fill: boolean;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+}
+
+export interface ObserverStatus {
+  last_poll_at: string | null;
+  total_offer_snapshots: number;
+  total_clearing_events: number;
+  watched_classes: number;
+  poll_interval_seconds: number;
+}
+
+export interface SimulatedHost {
+  id: string;
+  name: string | null;
+  gpu_name: string | null;
+  num_gpus: number | null;
+  gpu_ram_mb: number | null;
+  gpu_max_power_w: number | null;
+  verified: string;
+  reliability: number;
+  geolocation: string | null;
+  kwh_rate: number | null;
+  vast_service_fee_pct: number;
+  is_active: boolean;
+  created_at: string;
+  break_even_floor: number | null;
+}
+
+export interface WatchedClass {
+  id: string;
+  gpu_name: string;
+  num_gpus: number;
+  geolocation: string | null;
+  is_active: boolean;
+}

@@ -1,0 +1,13 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+SQLAlchemy==2.0.36
+alembic==1.14.0
+psycopg[binary]==3.2.3
+redis==5.2.1
+celery==5.4.0
+cryptography==44.0.0
+vastai==0.2.7
+tenacity==9.0.0
+python-dateutil==2.9.0.post0

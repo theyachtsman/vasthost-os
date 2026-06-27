@@ -1,0 +1,21 @@
+{
+  "name": "vasthost-os",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VastHost OS — host-side GPU business intelligence platform for Vast.ai hosts",
+  "packageManager": "pnpm@10.34.1",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "turbo": "^2.3.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

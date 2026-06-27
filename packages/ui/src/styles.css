@@ -1,0 +1,18 @@
+/* VastHost OS design tokens — dark-first, one restrained accent (indigo).
+   Consumed by apps that map these CSS vars in their Tailwind config. */
+
+:root {
+  /* Surfaces */
+  --vh-bg: 222 18% 7%; /* app background */
+  --vh-surface: 222 16% 10%; /* cards / panels */
+  --vh-surface-2: 222 15% 13%;
+  --vh-border: 222 12% 20%;
+
+  /* Foreground */
+  --vh-fg: 210 20% 92%;
+  --vh-muted: 218 10% 58%;
+
+  /* Accent — restrained indigo */
+  --vh-accent: 243 75% 65%;
+  --vh-accent-fg: 0 0% 100%;
+}
