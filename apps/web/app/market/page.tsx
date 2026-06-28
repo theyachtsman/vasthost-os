@@ -17,7 +17,9 @@ import {
 import { ClassSelector } from '@/components/class-selector';
 import { DistributionBar } from '@/components/distribution-bar';
 import { MarketOverviewTable } from '@/components/market-overview-table';
+import { MarketSummary } from '@/components/market-summary';
 import { PageHeader } from '@/components/page-header';
+import { PriceDemandScatter } from '@/components/price-demand-scatter';
 import { SizeLadder } from '@/components/size-ladder';
 import { SortHeader, useSort } from '@/components/sort-header';
 import { UtilizationBar, demandLabel } from '@/components/utilization';
@@ -41,8 +43,14 @@ export default function MarketPage() {
         description="Live supply, demand, and pricing across the Vast GPU market — what rents, for how much, and how fast. All prices are per-GPU/hour."
       />
 
+      {/* State of the market */}
+      <MarketSummary />
+
       {/* Hero: the whole market at a glance */}
       <MarketOverviewTable />
+
+      {/* Educational: where each GPU sits on price vs demand */}
+      <PriceDemandScatter />
 
       {/* Selected GPU deep-dive */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
@@ -132,6 +140,15 @@ function SelectedStatsCard({ cls }: { cls: { gpu_name: string; num_gpus: number 
   );
 }
 
+function Legend({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      <span className="h-1.5 w-3 rounded-full" style={{ background: color }} />
+      {label}
+    </span>
+  );
+}
+
 function Stat2({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
     <div className="flex flex-col">
@@ -197,7 +214,16 @@ function PriceDistributionWidget({ cls }: { cls: { gpu_name: string; num_gpus: n
 function SupplyDemandWidget({ cls }: { cls: { gpu_name: string; num_gpus: number } }) {
   const history = useDistributionHistory(cls.gpu_name, cls.num_gpus, 96);
   return (
-    <Widget title="Supply & Demand (24h)">
+    <Widget
+      title="Supply · Demand · Price over time"
+      action={
+        <div className="flex items-center gap-3 text-[10px] text-muted">
+          <Legend color="hsl(243 75% 65%)" label="Supply" />
+          <Legend color="hsl(160 70% 45%)" label="Util %" />
+          <Legend color="hsl(43 90% 55%)" label="Median $" />
+        </div>
+      }
+    >
       <DataState
         isLoading={history.isLoading}
         isError={history.isError}
@@ -215,11 +241,12 @@ function SupplyDemandWidget({ cls }: { cls: { gpu_name: string; num_gpus: number
             }),
             supply: r.supply_count ?? 0,
             util: r.utilization_pct ?? 0,
+            price: r.p50_price ?? null,
           }));
           return (
             <div className="h-56 pt-2">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                <AreaChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
                   <defs>
                     <linearGradient id="supply" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="hsl(243 75% 65%)" stopOpacity={0.4} />
@@ -228,7 +255,16 @@ function SupplyDemandWidget({ cls }: { cls: { gpu_name: string; num_gpus: number
                   </defs>
                   <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
                   <XAxis dataKey="t" {...AXIS} tickLine={false} minTickGap={32} />
-                  <YAxis {...AXIS} tickLine={false} axisLine={false} width={36} />
+                  <YAxis yAxisId="left" {...AXIS} tickLine={false} axisLine={false} width={36} />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    {...AXIS}
+                    tickLine={false}
+                    axisLine={false}
+                    width={44}
+                    tickFormatter={(v) => `$${v}`}
+                  />
                   <Tooltip
                     contentStyle={{
                       background: 'hsl(222 16% 10%)',
@@ -238,6 +274,7 @@ function SupplyDemandWidget({ cls }: { cls: { gpu_name: string; num_gpus: number
                     }}
                   />
                   <Area
+                    yAxisId="left"
                     type="monotone"
                     dataKey="supply"
                     stroke="hsl(243 75% 65%)"
@@ -245,11 +282,21 @@ function SupplyDemandWidget({ cls }: { cls: { gpu_name: string; num_gpus: number
                     strokeWidth={2}
                   />
                   <Line
+                    yAxisId="left"
                     type="monotone"
                     dataKey="util"
                     stroke="hsl(160 70% 45%)"
                     dot={false}
                     strokeWidth={1.5}
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="price"
+                    stroke="hsl(43 90% 55%)"
+                    dot={false}
+                    strokeWidth={1.5}
+                    connectNulls
                   />
                 </AreaChart>
               </ResponsiveContainer>
