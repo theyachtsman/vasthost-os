@@ -247,7 +247,7 @@ function ClearingEventsTable({ cls }: { cls: { gpu_name: string; num_gpus: numbe
         emptyMessage={
           (events.data?.length ?? 0) > 0
             ? 'No events match these filters.'
-            : 'Demand signal paused. Vast’s search returns a random sample each call, so per-offer “clearing” detection was too noisy to trust — it’s being rebuilt on a sampling-robust supply-estimation model (Phase 4). Price distributions above are unaffected.'
+            : 'No confirmed rentals yet — events appear as offers move from available to rented (directly observed, accumulating each poll).'
         }
       >
         {(rows) => (

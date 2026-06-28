@@ -219,7 +219,7 @@ function MarketActivityCard({ cls }: { cls: { gpu_name: string; num_gpus: number
         error={events.error}
         data={events.data}
         onRetry={events.refetch}
-        emptyMessage="Demand signal paused — being rebuilt on a sampling-robust model (Phase 4). Price data is unaffected."
+        emptyMessage="No confirmed rentals yet for this class — directly observed as offers move to rented."
       >
         {(evts) => {
           const now = Date.now();

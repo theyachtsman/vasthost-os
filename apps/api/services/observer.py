@@ -131,189 +131,165 @@ def market_observer_poll(db: Session) -> int:
     now = datetime.now(UTC)
     written = 0
 
-    for name in gpu_names:
-        query = f"gpu_name={name.replace(' ', '_')}"
-        try:
-            offers = client.search_offers(query=query, limit=2000)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("observer poll failed for %s: %s", name, exc)
-            continue
-
-        seen_offer_ids = set()
-        for o in offers:
-            offer_id = o.get("id")
-            if offer_id is None:
-                continue
-            seen_offer_ids.add(int(offer_id))
-            # Vast's dph_base is the TOTAL offer price (scales linearly with
-            # num_gpus). Normalise to per-GPU so all config-size buckets are
-            # directly comparable; dph_total keeps the renter-pays total.
-            num = o.get("num_gpus") or 1
-            dph_base = o.get("dph_base")
-            price_per_gpu = (dph_base / num) if (dph_base is not None and num) else dph_base
-            db.add(
-                OfferSnapshot(
-                    observed_at=now,
-                    offer_id=int(offer_id),
-                    machine_id=o.get("machine_id"),
-                    gpu_name=o.get("gpu_name") or name,
-                    num_gpus=o.get("num_gpus"),
-                    gpu_ram_mb=o.get("gpu_ram"),
-                    gpu_max_power_w=o.get("gpu_max_power"),
-                    reliability=o.get("reliability"),
-                    verified=o.get("verified"),
-                    geolocation=o.get("geolocation"),
-                    price_gpu=price_per_gpu,
-                    price_disk=o.get("storage_cost"),
-                    price_inetu=o.get("inet_up_cost"),
-                    price_inetd=o.get("inet_down_cost"),
-                    dph_total=o.get("dph_total"),
-                    dlperf=o.get("dlperf"),
-                    dlperf_per_dphtotal=o.get("dlperf_per_dphtotal"),
-                    rentable=o.get("rentable"),
-                    rented=o.get("rented"),
-                    num_gpus_available=o.get("num_gpus"),
-                    end_date=_ts(o.get("end_date")),
-                )
+    def _snapshot(o: dict, rentable: bool) -> None:
+        offer_id = o.get("id")
+        if offer_id is None:
+            return
+        # Vast's dph_base is the TOTAL offer price (scales linearly with
+        # num_gpus). Normalise to per-GPU so all config-size buckets are
+        # directly comparable; dph_total keeps the renter-pays total.
+        num = o.get("num_gpus") or 1
+        dph_base = o.get("dph_base")
+        price_per_gpu = (dph_base / num) if (dph_base is not None and num) else dph_base
+        db.add(
+            OfferSnapshot(
+                observed_at=now,
+                offer_id=int(offer_id),
+                machine_id=o.get("machine_id"),
+                gpu_name=o.get("gpu_name") or name,
+                num_gpus=o.get("num_gpus"),
+                gpu_ram_mb=o.get("gpu_ram"),
+                gpu_max_power_w=o.get("gpu_max_power"),
+                reliability=o.get("reliability"),
+                verified=o.get("verified"),
+                geolocation=o.get("geolocation"),
+                price_gpu=price_per_gpu,
+                price_disk=o.get("storage_cost"),
+                price_inetu=o.get("inet_up_cost"),
+                price_inetd=o.get("inet_down_cost"),
+                dph_total=o.get("dph_total"),
+                dlperf=o.get("dlperf"),
+                dlperf_per_dphtotal=o.get("dlperf_per_dphtotal"),
+                # Trust the query we asked for over the (unreliable) response flag.
+                rentable=rentable,
+                rented=not rentable,
+                num_gpus_available=o.get("num_gpus"),
+                end_date=_ts(o.get("end_date")),
             )
+        )
+
+    for name in gpu_names:
+        q = name.replace(" ", "_")
+        # Two queries: available (rentable) supply, and unavailable (rented) —
+        # Vast's "unavailable offers" filter. Capturing both gives real
+        # utilization and lets us confirm rentals directly (no absence inference).
+        try:
+            available = client.search_offers(query=f"gpu_name={q}", limit=2000)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("observer poll (available) failed for %s: %s", name, exc)
+            available = []
+        try:
+            unavailable = client.search_offers(query=f"gpu_name={q} rentable=false", limit=2000)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("observer poll (unavailable) failed for %s: %s", name, exc)
+            unavailable = []
+
+        for o in available:
+            _snapshot(o, rentable=True)
+            written += 1
+        unavailable_ids = set()
+        for o in unavailable:
+            _snapshot(o, rentable=False)
+            if o.get("id") is not None:
+                unavailable_ids.add(int(o["id"]))
             written += 1
 
         if CLEARING_DETECTION_ENABLED:
-            _detect_clearing(db, name, seen_offer_ids, now)
+            _detect_clearing(db, name, unavailable_ids, now)
 
     db.commit()
     logger.info(
-        "observer: wrote %s snapshots across %s GPU classes (all sizes)", written, len(gpu_names)
+        "observer: wrote %s snapshots across %s GPU classes (avail+unavail, all sizes)",
+        written,
+        len(gpu_names),
     )
     return written
 
 
-# ── Clearing detection: DISABLED pending a sampling-robust redesign ──────────
-# Vast's search_offers returns a *random sample* of matching offers on every
-# call (measured: ~32% coverage; only ~12% of results stable across identical
-# back-to-back calls, even for narrow single-size queries). Offer absence
-# between polls is therefore dominated by sampling noise, not real rentals, so
-# per-offer "disappeared = rented" detection produces hundreds of false events
-# per poll and cannot be made reliable at any reasonable latency.
-#
-# Price DISTRIBUTIONS are unaffected (a random sample yields unbiased
-# percentiles). The demand signal will be rebuilt on a statistical foundation
-# (mark-recapture supply estimation + supply-depletion), tracked as Phase 4
-# (demand engine) work. Until then we do NOT emit per-offer clearing events.
-CLEARING_DETECTION_ENABLED = False
-CLEARING_MIN_POLLS_SEEN = 2
-CLEARING_DEDUP_HOURS = 6
+# ── Clearing detection: direct rental observation (transition-based) ─────────
+# Vast's search_offers returns a *random sample* each call, so absence-based
+# detection is pure noise. Instead we observe rentals DIRECTLY: each poll we
+# capture both available (rentable=true) and unavailable (rentable=false) offers.
+# An offer we previously saw as AVAILABLE and now see as UNAVAILABLE has been
+# rented — a confirmed event. Sampling only makes us miss some (false negatives),
+# never invent them (no false positives), so every recorded event is real.
+CLEARING_DETECTION_ENABLED = True
+CLEARING_LOOKBACK_HOURS = 12
+CLEARING_DEDUP_HOURS = 12
 
 
 def _detect_clearing(
-    db: Session, gpu_name: str, current_offer_ids: set[int], now: datetime
+    db: Session, gpu_name: str, unavailable_ids: set[int], now: datetime
 ) -> None:
-    """Detect probable rentals for a gpu_name using persistence.
-
-    An offer is counted as cleared only if it was AVAILABLE two polls ago, is
-    absent in BOTH the previous poll and the current one (two consecutive
-    absences), and was established (appeared in >= CLEARING_MIN_POLLS_SEEN
-    distinct polls). Each offer can only clear once per dedup window.
-    """
-    # The two most recent *prior* polls for this gpu_name (current poll's
-    # snapshots are not yet committed, so we key "now" off current_offer_ids).
-    prior_polls = list(
-        db.scalars(
-            select(OfferSnapshot.observed_at)
-            .where(OfferSnapshot.observed_at < now, OfferSnapshot.gpu_name == gpu_name)
-            .distinct()
-            .order_by(OfferSnapshot.observed_at.desc())
-            .limit(2)
-        )
-    )
-    if len(prior_polls) < 2:
-        return  # need at least two prior polls to confirm persistence
-    p1, p2 = prior_polls[0], prior_polls[1]  # p1 = previous, p2 = before that
-
-    # Offers that were rentable+idle two polls ago.
-    avail_p2 = set(
-        db.scalars(
-            select(OfferSnapshot.offer_id).where(
-                OfferSnapshot.observed_at == p2,
-                OfferSnapshot.gpu_name == gpu_name,
-                OfferSnapshot.rentable.is_(True),
-                OfferSnapshot.rented.is_(False),
-            )
-        )
-    )
-    if not avail_p2:
-        return
-    # Present in the previous poll (any status).
-    present_p1 = set(
-        db.scalars(
-            select(OfferSnapshot.offer_id).where(
-                OfferSnapshot.observed_at == p1,
-                OfferSnapshot.gpu_name == gpu_name,
-            )
-        )
-    )
-    # Candidates: available at p2, then absent at p1 AND now (2 consecutive).
-    candidates = avail_p2 - present_p1 - current_offer_ids
-    if not candidates:
+    """Record confirmed rentals: offers now UNAVAILABLE that we previously
+    observed as AVAILABLE. Each offer clears once per dedup window."""
+    if not unavailable_ids:
         return
 
-    # Drop any we've already recorded recently (de-dup flicker).
+    # Of the currently-unavailable offers, which did we previously see available?
+    rows = db.execute(
+        select(
+            OfferSnapshot.offer_id,
+            func.min(OfferSnapshot.observed_at),
+            func.max(OfferSnapshot.observed_at),
+            func.count(func.distinct(OfferSnapshot.observed_at)),
+        )
+        .where(
+            OfferSnapshot.offer_id.in_(unavailable_ids),
+            OfferSnapshot.gpu_name == gpu_name,
+            OfferSnapshot.rentable.is_(True),
+            OfferSnapshot.observed_at >= now - timedelta(hours=CLEARING_LOOKBACK_HOURS),
+        )
+        .group_by(OfferSnapshot.offer_id)
+    ).all()
+    if not rows:
+        return
+
+    candidate_ids = {r[0] for r in rows}
     already = set(
         db.scalars(
             select(ClearingEvent.offer_id).where(
-                ClearingEvent.offer_id.in_(candidates),
+                ClearingEvent.offer_id.in_(candidate_ids),
                 ClearingEvent.detected_at >= now - timedelta(hours=CLEARING_DEDUP_HOURS),
             )
         )
     )
-    candidates -= already
-    if not candidates:
-        return
 
-    for offer_id in candidates:
-        seen_polls, first_seen, last_seen = db.execute(
-            select(
-                func.count(func.distinct(OfferSnapshot.observed_at)),
-                func.min(OfferSnapshot.observed_at),
-                func.max(OfferSnapshot.observed_at),
-            ).where(
+    for offer_id, first_avail, last_avail, avail_polls in rows:
+        if offer_id in already:
+            continue
+        dwell_minutes = None
+        if first_avail is not None and last_avail is not None:
+            dwell_minutes = int((last_avail - first_avail).total_seconds() // 60)
+
+        # Price/meta from the last time it was AVAILABLE (the price it rented at).
+        last_avail_snap = db.scalar(
+            select(OfferSnapshot)
+            .where(
                 OfferSnapshot.offer_id == offer_id,
                 OfferSnapshot.gpu_name == gpu_name,
+                OfferSnapshot.rentable.is_(True),
             )
-        ).one()
-        if (seen_polls or 0) < CLEARING_MIN_POLLS_SEEN:
-            continue  # never established — flicker, not a rental
-
-        dwell_minutes = None
-        if first_seen is not None and last_seen is not None:
-            dwell_minutes = int((last_seen - first_seen).total_seconds() // 60)
-
-        # Metadata from the last snapshot in which we saw it.
-        last_snap = db.scalar(
-            select(OfferSnapshot)
-            .where(OfferSnapshot.offer_id == offer_id, OfferSnapshot.gpu_name == gpu_name)
             .order_by(OfferSnapshot.observed_at.desc())
         )
-        if last_snap is None:
+        if last_avail_snap is None:
             continue
 
-        # Confidence: a longer-lived, well-established listing that vanishes is a
-        # stronger rental signal.
-        confidence = "MEDIUM"
-        if dwell_minutes is not None and dwell_minutes >= 15 and (seen_polls or 0) >= 5:
-            confidence = "HIGH"
-        elif dwell_minutes is not None and dwell_minutes < 6:
-            confidence = "LOW"
+        # All events are confirmed rentals; grade by how established the listing
+        # was (a long-lived offer that rents is a stronger demand signal).
+        confidence = "HIGH"
+        if (avail_polls or 0) < 2:
+            confidence = "MEDIUM"
 
         db.add(
             ClearingEvent(
                 detected_at=now,
                 offer_id=offer_id,
-                gpu_name=last_snap.gpu_name,
-                num_gpus=last_snap.num_gpus,
-                verified=last_snap.verified,
-                geolocation=last_snap.geolocation,
-                last_price_gpu=last_snap.price_gpu,
+                gpu_name=last_avail_snap.gpu_name,
+                num_gpus=last_avail_snap.num_gpus,
+                verified=last_avail_snap.verified,
+                geolocation=last_avail_snap.geolocation,
+                last_price_gpu=last_avail_snap.price_gpu,
                 dwell_minutes=dwell_minutes,
                 is_partial_fill=False,
                 confidence=confidence,
@@ -358,10 +334,14 @@ def market_distribution_aggregate(db: Session) -> int:
             buckets.setdefault(s.num_gpus, []).append(s)
 
         for num_gpus, group in buckets.items():
-            prices = sorted(float(s.price_gpu) for s in group if s.price_gpu is not None)
-            supply = len(group)
-            rented = sum(1 for s in group if s.rented)
-            util = round(100.0 * rented / supply, 2) if supply else None
+            available = [s for s in group if s.rentable]
+            unavailable = [s for s in group if not s.rentable]
+            # Price distribution is the ASKING market — available offers only.
+            prices = sorted(float(s.price_gpu) for s in available if s.price_gpu is not None)
+            avail_n = len(available)
+            rented_n = len(unavailable)
+            total = avail_n + rented_n
+            util = round(100.0 * rented_n / total, 2) if total else None
 
             db.add(
                 MarketDistribution(
@@ -375,8 +355,8 @@ def market_distribution_aggregate(db: Session) -> int:
                     p50_price=percentile(prices, 50),
                     p75_price=percentile(prices, 75),
                     p90_price=percentile(prices, 90),
-                    supply_count=supply,
-                    rented_count=rented,
+                    supply_count=total,  # total observed (available + rented)
+                    rented_count=rented_n,
                     utilization_pct=util,
                     clearing_rate_1h=_clearing_rate(db, name, num_gpus, now, hours=1),
                     clearing_rate_24h=_clearing_rate(db, name, num_gpus, now, hours=24),
