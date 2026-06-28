@@ -5,6 +5,7 @@ import {
   type DailyEarningPoint,
   type Distribution,
   type EarningsSummary,
+  type MarketOverviewRow,
   type HealthResponse,
   type Machine,
   type MachineDetail,
@@ -136,6 +137,20 @@ export const useAvailableClasses = () =>
   useQuery({
     queryKey: ['available-classes'],
     queryFn: () => api.get<AvailableClass[]>('/market/available-classes'),
+    refetchInterval: 60_000,
+  });
+
+export const useMarketOverview = () =>
+  useQuery({
+    queryKey: ['market-overview'],
+    queryFn: () => api.get<MarketOverviewRow[]>('/market/overview'),
+    refetchInterval: 60_000,
+  });
+
+export const useMarketSizes = (gpu_name: string) =>
+  useQuery({
+    queryKey: ['market-sizes', gpu_name],
+    queryFn: () => api.get<Distribution[]>(`/market/sizes?gpu_name=${encodeURIComponent(gpu_name)}`),
     refetchInterval: 60_000,
   });
 

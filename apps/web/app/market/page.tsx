@@ -16,15 +16,14 @@ import {
 
 import { ClassSelector } from '@/components/class-selector';
 import { DistributionBar } from '@/components/distribution-bar';
+import { MarketOverviewTable } from '@/components/market-overview-table';
 import { PageHeader } from '@/components/page-header';
+import { SizeLadder } from '@/components/size-ladder';
 import { SortHeader, useSort } from '@/components/sort-header';
+import { UtilizationBar, demandLabel } from '@/components/utilization';
 import { Widget } from '@/components/widget';
 import { dph, num, pct, relativeTime } from '@/lib/format';
-import {
-  useClearingEvents,
-  useDistribution,
-  useDistributionHistory,
-} from '@/lib/hooks';
+import { useClearingEvents, useDistribution, useDistributionHistory } from '@/lib/hooks';
 import { useClassStore } from '@/lib/store';
 
 const AXIS = { stroke: 'hsl(218 10% 58%)', fontSize: 11 };
@@ -39,16 +38,106 @@ export default function MarketPage() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Market Intelligence"
-        description="Where you sit in the market, and how hot it is right now."
-        actions={<ClassSelector />}
+        description="Live supply, demand, and pricing across the Vast GPU market — what rents, for how much, and how fast. All prices are per-GPU/hour."
       />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <PriceDistributionWidget cls={cls} />
-        <SupplyDemandWidget cls={cls} />
+      {/* Hero: the whole market at a glance */}
+      <MarketOverviewTable />
+
+      {/* Selected GPU deep-dive */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+        <h2 className="text-sm font-semibold text-fg">
+          Deep dive — <span className="text-accent">{cls.gpu_name}</span>
+        </h2>
+        <ClassSelector />
       </div>
 
-      <ClearingEventsTable cls={cls} />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <PriceDistributionWidget cls={cls} />
+        </div>
+        <SelectedStatsCard cls={cls} />
+      </div>
+
+      <SizeLadder />
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <SupplyDemandWidget cls={cls} />
+        <ClearingEventsTable cls={cls} />
+      </div>
+    </div>
+  );
+}
+
+function SelectedStatsCard({ cls }: { cls: { gpu_name: string; num_gpus: number } }) {
+  const dist = useDistribution(cls.gpu_name, cls.num_gpus);
+  const events = useClearingEvents(cls.gpu_name, cls.num_gpus, 500);
+
+  const now = Date.now();
+  const rentals24h = (events.data ?? []).filter(
+    (e) => now - new Date(e.detected_at).getTime() < 24 * 3.6e6,
+  );
+  const dwells = rentals24h
+    .map((e) => e.dwell_minutes)
+    .filter((d): d is number => d != null)
+    .sort((a, b) => a - b);
+  const medianDwell = dwells.length ? dwells[Math.floor(dwells.length / 2)] : null;
+
+  return (
+    <Widget title={`Demand — ${cls.gpu_name} ×${cls.num_gpus}`}>
+      <DataState
+        isLoading={dist.isLoading}
+        isError={dist.isError}
+        error={dist.error}
+        data={dist.data}
+        onRetry={dist.refetch}
+        emptyMessage="No distribution for this size yet."
+      >
+        {(d) => {
+          const dl = demandLabel(d.utilization_pct);
+          const total = d.supply_count ?? 0;
+          const rented = d.rented_count ?? 0;
+          return (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-end justify-between">
+                <div>
+                  <div className="text-[11px] uppercase text-muted">Utilization</div>
+                  <div className={'text-3xl font-semibold tabular-nums ' + dl.cls}>
+                    {pct(d.utilization_pct, 0)}
+                  </div>
+                </div>
+                <span className={'mb-1 text-sm font-medium ' + dl.cls}>{dl.label} demand</span>
+              </div>
+              <UtilizationBar pct={d.utilization_pct} showLabel={false} />
+
+              <div className="grid grid-cols-2 gap-3 border-t border-border pt-3 text-sm">
+                <Stat2 label="Available" value={num(total - rented)} />
+                <Stat2 label="Rented" value={num(rented)} />
+                <Stat2 label="Rentals (24h)" value={num(rentals24h.length)} />
+                <Stat2
+                  label="Median dwell"
+                  value={medianDwell != null ? `${Math.round(medianDwell)}m` : '—'}
+                  hint="time listed before renting"
+                />
+              </div>
+              <p className="text-[11px] text-muted">
+                Median ask {dph(d.p50_price)} · {dl.label.toLowerCase()} markets clear faster and
+                support firmer pricing.
+              </p>
+            </div>
+          );
+        }}
+      </DataState>
+    </Widget>
+  );
+}
+
+function Stat2({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[10px] uppercase tracking-wide text-muted">{label}</span>
+      <span className="tabular-nums text-fg">{value}</span>
+      {hint ? <span className="text-[10px] text-muted/70">{hint}</span> : null}
     </div>
   );
 }
@@ -207,7 +296,7 @@ function ClearingEventsTable({ cls }: { cls: { gpu_name: string; num_gpus: numbe
 
   return (
     <Widget
-      title="Recent Clearing Events"
+      title="Recent Rentals — confirmed, with price & dwell"
       action={
         <div className="flex items-center gap-2">
           <select
@@ -257,7 +346,7 @@ function ClearingEventsTable({ cls }: { cls: { gpu_name: string; num_gpus: numbe
                 <tr className="border-b border-border text-left text-[11px] uppercase">
                   <SortHeader label="GPU" sortKey="gpu" state={sortState} />
                   <SortHeader label="Region" sortKey="region" state={sortState} />
-                  <SortHeader label="Price" sortKey="price" state={sortState} align="right" />
+                  <SortHeader label="Rented at" sortKey="price" state={sortState} align="right" />
                   <SortHeader label="Dwell" sortKey="dwell" state={sortState} align="right" />
                   <SortHeader label="Confidence" sortKey="confidence" state={sortState} />
                   <SortHeader label="When" sortKey="when" state={sortState} align="right" />

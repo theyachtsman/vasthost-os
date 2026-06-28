@@ -171,6 +171,23 @@ export interface AvailableClass {
   supply_count: number | null;
 }
 
+export interface MarketOverviewRow {
+  gpu_name: string;
+  num_gpus: number;
+  p10_price: number | null;
+  p25_price: number | null;
+  p50_price: number | null;
+  p75_price: number | null;
+  p90_price: number | null;
+  supply_count: number | null;
+  available_count: number | null;
+  rented_count: number | null;
+  utilization_pct: number | null;
+  rentals_24h: number;
+  median_dwell_minutes: number | null;
+  computed_at: string;
+}
+
 export interface ProjectionPoint {
   label: 'p25' | 'p50' | 'p75';
   price_gpu: number;

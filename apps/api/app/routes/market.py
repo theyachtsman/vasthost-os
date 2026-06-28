@@ -11,6 +11,7 @@ from schemas.models import (
     AvailableClass,
     ClearingEventOut,
     DistributionOut,
+    MarketOverviewRow,
     ObserverStatus,
     WatchedClassIn,
     WatchedClassOut,
@@ -113,6 +114,104 @@ def available_classes(db: Session = Depends(get_db)) -> list[AvailableClass]:
     ]
     out.sort(key=lambda x: (x.gpu_name, x.num_gpus))
     return out
+
+
+@router.get("/overview", response_model=list[MarketOverviewRow])
+def overview(db: Session = Depends(get_db)) -> list[MarketOverviewRow]:
+    """Cross-GPU market leaderboard at the per-GPU (num_gpus=1) reference market:
+    latest price distribution, real utilization, and 24h rental activity."""
+    since = datetime.now(UTC) - timedelta(minutes=90)
+    # Latest distribution per gpu_name at the per-GPU bucket.
+    dist_rows = db.scalars(
+        select(MarketDistribution)
+        .where(
+            MarketDistribution.num_gpus == 1,
+            MarketDistribution.computed_at >= since,
+        )
+        .order_by(MarketDistribution.computed_at.desc())
+    )
+    latest: dict[str, MarketDistribution] = {}
+    for d in dist_rows:
+        if d.gpu_name not in latest:
+            latest[d.gpu_name] = d
+    if not latest:
+        return []
+
+    # 24h rental counts + median dwell per gpu_name (per-GPU bucket).
+    day_ago = datetime.now(UTC) - timedelta(hours=24)
+    counts = dict(
+        db.execute(
+            select(ClearingEvent.gpu_name, func.count(ClearingEvent.id))
+            .where(
+                ClearingEvent.detected_at >= day_ago,
+                ClearingEvent.num_gpus == 1,
+            )
+            .group_by(ClearingEvent.gpu_name)
+        ).all()
+    )
+    dwell = dict(
+        db.execute(
+            select(
+                ClearingEvent.gpu_name,
+                func.percentile_cont(0.5).within_group(ClearingEvent.dwell_minutes.asc()),
+            )
+            .where(
+                ClearingEvent.detected_at >= day_ago,
+                ClearingEvent.num_gpus == 1,
+                ClearingEvent.dwell_minutes.is_not(None),
+            )
+            .group_by(ClearingEvent.gpu_name)
+        ).all()
+    )
+
+    out: list[MarketOverviewRow] = []
+    for name, d in latest.items():
+        total = d.supply_count or 0
+        rented = d.rented_count or 0
+        out.append(
+            MarketOverviewRow(
+                gpu_name=name,
+                num_gpus=1,
+                p10_price=_f(d.p10_price),
+                p25_price=_f(d.p25_price),
+                p50_price=_f(d.p50_price),
+                p75_price=_f(d.p75_price),
+                p90_price=_f(d.p90_price),
+                supply_count=total,
+                available_count=max(0, total - rented),
+                rented_count=rented,
+                utilization_pct=_f(d.utilization_pct),
+                rentals_24h=int(counts.get(name, 0)),
+                median_dwell_minutes=_f(dwell.get(name)),
+                computed_at=d.computed_at,
+            )
+        )
+    out.sort(key=lambda r: (r.utilization_pct or 0), reverse=True)
+    return out
+
+
+@router.get("/sizes", response_model=list[DistributionOut])
+def sizes(gpu_name: str = Query(...), db: Session = Depends(get_db)) -> list[DistributionOut]:
+    """Latest distribution per config size (num_gpus) for one GPU — the size
+    ladder (×1, ×2, ×4, ×8 …) on a comparable per-GPU price basis."""
+    since = datetime.now(UTC) - timedelta(minutes=90)
+    rows = db.scalars(
+        select(MarketDistribution)
+        .where(
+            MarketDistribution.gpu_name == gpu_name,
+            MarketDistribution.computed_at >= since,
+        )
+        .order_by(MarketDistribution.computed_at.desc())
+    )
+    latest: dict[int, MarketDistribution] = {}
+    for d in rows:
+        if d.num_gpus not in latest:
+            latest[d.num_gpus] = d
+    return [DistributionOut.model_validate(latest[k]) for k in sorted(latest)]
+
+
+def _f(v) -> float | None:
+    return float(v) if v is not None else None
 
 
 # ── Watched classes (drive the Observer; managed from Settings) ──

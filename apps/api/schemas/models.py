@@ -166,6 +166,23 @@ class AvailableClass(BaseModel):
     supply_count: int | None
 
 
+class MarketOverviewRow(BaseModel):
+    gpu_name: str
+    num_gpus: int
+    p10_price: float | None
+    p25_price: float | None
+    p50_price: float | None
+    p75_price: float | None
+    p90_price: float | None
+    supply_count: int | None
+    available_count: int | None
+    rented_count: int | None
+    utilization_pct: float | None
+    rentals_24h: int
+    median_dwell_minutes: float | None
+    computed_at: datetime
+
+
 # ── Simulator ──────────────────────────────────────────────────
 class SimulatedHostIn(BaseModel):
     name: str | None = None
