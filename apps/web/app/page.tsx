@@ -219,7 +219,7 @@ function MarketActivityCard({ cls }: { cls: { gpu_name: string; num_gpus: number
         error={events.error}
         data={events.data}
         onRetry={events.refetch}
-        emptyMessage="No clearing events detected yet for this class."
+        emptyMessage="Demand signal paused — being rebuilt on a sampling-robust model (Phase 4). Price data is unaffected."
       >
         {(evts) => {
           const now = Date.now();

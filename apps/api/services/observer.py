@@ -178,7 +178,8 @@ def market_observer_poll(db: Session) -> int:
             )
             written += 1
 
-        _detect_clearing(db, name, seen_offer_ids, now)
+        if CLEARING_DETECTION_ENABLED:
+            _detect_clearing(db, name, seen_offer_ids, now)
 
     db.commit()
     logger.info(
@@ -187,60 +188,132 @@ def market_observer_poll(db: Session) -> int:
     return written
 
 
+# ── Clearing detection: DISABLED pending a sampling-robust redesign ──────────
+# Vast's search_offers returns a *random sample* of matching offers on every
+# call (measured: ~32% coverage; only ~12% of results stable across identical
+# back-to-back calls, even for narrow single-size queries). Offer absence
+# between polls is therefore dominated by sampling noise, not real rentals, so
+# per-offer "disappeared = rented" detection produces hundreds of false events
+# per poll and cannot be made reliable at any reasonable latency.
+#
+# Price DISTRIBUTIONS are unaffected (a random sample yields unbiased
+# percentiles). The demand signal will be rebuilt on a statistical foundation
+# (mark-recapture supply estimation + supply-depletion), tracked as Phase 4
+# (demand engine) work. Until then we do NOT emit per-offer clearing events.
+CLEARING_DETECTION_ENABLED = False
+CLEARING_MIN_POLLS_SEEN = 2
+CLEARING_DEDUP_HOURS = 6
+
+
 def _detect_clearing(
     db: Session, gpu_name: str, current_offer_ids: set[int], now: datetime
 ) -> None:
-    """Compare the previous poll's available offers (this gpu_name, any size)
-    against this poll's. A vanished offer is a probable rental; its own num_gpus
-    is recorded on the event."""
-    prev_poll_at = db.scalar(
-        select(func.max(OfferSnapshot.observed_at)).where(
-            OfferSnapshot.observed_at < now,
-            OfferSnapshot.gpu_name == gpu_name,
+    """Detect probable rentals for a gpu_name using persistence.
+
+    An offer is counted as cleared only if it was AVAILABLE two polls ago, is
+    absent in BOTH the previous poll and the current one (two consecutive
+    absences), and was established (appeared in >= CLEARING_MIN_POLLS_SEEN
+    distinct polls). Each offer can only clear once per dedup window.
+    """
+    # The two most recent *prior* polls for this gpu_name (current poll's
+    # snapshots are not yet committed, so we key "now" off current_offer_ids).
+    prior_polls = list(
+        db.scalars(
+            select(OfferSnapshot.observed_at)
+            .where(OfferSnapshot.observed_at < now, OfferSnapshot.gpu_name == gpu_name)
+            .distinct()
+            .order_by(OfferSnapshot.observed_at.desc())
+            .limit(2)
         )
     )
-    if prev_poll_at is None:
-        return
+    if len(prior_polls) < 2:
+        return  # need at least two prior polls to confirm persistence
+    p1, p2 = prior_polls[0], prior_polls[1]  # p1 = previous, p2 = before that
 
-    prev_available = db.scalars(
-        select(OfferSnapshot).where(
-            OfferSnapshot.observed_at == prev_poll_at,
-            OfferSnapshot.gpu_name == gpu_name,
-            OfferSnapshot.rentable.is_(True),
-            OfferSnapshot.rented.is_(False),
-        )
-    )
-
-    for prev in prev_available:
-        if prev.offer_id in current_offer_ids:
-            continue  # still present — no clearing
-        # First sighting -> dwell time.
-        first_seen = db.scalar(
-            select(func.min(OfferSnapshot.observed_at)).where(
-                OfferSnapshot.offer_id == prev.offer_id
+    # Offers that were rentable+idle two polls ago.
+    avail_p2 = set(
+        db.scalars(
+            select(OfferSnapshot.offer_id).where(
+                OfferSnapshot.observed_at == p2,
+                OfferSnapshot.gpu_name == gpu_name,
+                OfferSnapshot.rentable.is_(True),
+                OfferSnapshot.rented.is_(False),
             )
         )
-        dwell_minutes = None
-        if first_seen is not None:
-            dwell_minutes = int((now - first_seen).total_seconds() // 60)
+    )
+    if not avail_p2:
+        return
+    # Present in the previous poll (any status).
+    present_p1 = set(
+        db.scalars(
+            select(OfferSnapshot.offer_id).where(
+                OfferSnapshot.observed_at == p1,
+                OfferSnapshot.gpu_name == gpu_name,
+            )
+        )
+    )
+    # Candidates: available at p2, then absent at p1 AND now (2 consecutive).
+    candidates = avail_p2 - present_p1 - current_offer_ids
+    if not candidates:
+        return
 
-        # Confidence: a longer-lived listing that vanishes is a stronger signal.
+    # Drop any we've already recorded recently (de-dup flicker).
+    already = set(
+        db.scalars(
+            select(ClearingEvent.offer_id).where(
+                ClearingEvent.offer_id.in_(candidates),
+                ClearingEvent.detected_at >= now - timedelta(hours=CLEARING_DEDUP_HOURS),
+            )
+        )
+    )
+    candidates -= already
+    if not candidates:
+        return
+
+    for offer_id in candidates:
+        seen_polls, first_seen, last_seen = db.execute(
+            select(
+                func.count(func.distinct(OfferSnapshot.observed_at)),
+                func.min(OfferSnapshot.observed_at),
+                func.max(OfferSnapshot.observed_at),
+            ).where(
+                OfferSnapshot.offer_id == offer_id,
+                OfferSnapshot.gpu_name == gpu_name,
+            )
+        ).one()
+        if (seen_polls or 0) < CLEARING_MIN_POLLS_SEEN:
+            continue  # never established — flicker, not a rental
+
+        dwell_minutes = None
+        if first_seen is not None and last_seen is not None:
+            dwell_minutes = int((last_seen - first_seen).total_seconds() // 60)
+
+        # Metadata from the last snapshot in which we saw it.
+        last_snap = db.scalar(
+            select(OfferSnapshot)
+            .where(OfferSnapshot.offer_id == offer_id, OfferSnapshot.gpu_name == gpu_name)
+            .order_by(OfferSnapshot.observed_at.desc())
+        )
+        if last_snap is None:
+            continue
+
+        # Confidence: a longer-lived, well-established listing that vanishes is a
+        # stronger rental signal.
         confidence = "MEDIUM"
-        if dwell_minutes is not None:
-            if dwell_minutes >= 15:
-                confidence = "HIGH"
-            elif dwell_minutes < 5:
-                confidence = "LOW"
+        if dwell_minutes is not None and dwell_minutes >= 15 and (seen_polls or 0) >= 5:
+            confidence = "HIGH"
+        elif dwell_minutes is not None and dwell_minutes < 6:
+            confidence = "LOW"
 
         db.add(
             ClearingEvent(
                 detected_at=now,
-                offer_id=prev.offer_id,
-                gpu_name=prev.gpu_name,
-                num_gpus=prev.num_gpus,
-                verified=prev.verified,
-                geolocation=prev.geolocation,
-                last_price_gpu=prev.price_gpu,
+                offer_id=offer_id,
+                gpu_name=last_snap.gpu_name,
+                num_gpus=last_snap.num_gpus,
+                verified=last_snap.verified,
+                geolocation=last_snap.geolocation,
+                last_price_gpu=last_snap.price_gpu,
                 dwell_minutes=dwell_minutes,
                 is_partial_fill=False,
                 confidence=confidence,

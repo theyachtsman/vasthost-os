@@ -247,7 +247,7 @@ function ClearingEventsTable({ cls }: { cls: { gpu_name: string; num_gpus: numbe
         emptyMessage={
           (events.data?.length ?? 0) > 0
             ? 'No events match these filters.'
-            : 'No clearing events yet — the Observer flags these as offers disappear.'
+            : 'Demand signal paused. Vast’s search returns a random sample each call, so per-offer “clearing” detection was too noisy to trust — it’s being rebuilt on a sampling-robust supply-estimation model (Phase 4). Price distributions above are unaffected.'
         }
       >
         {(rows) => (
