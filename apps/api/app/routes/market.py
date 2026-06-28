@@ -183,6 +183,8 @@ def overview(db: Session = Depends(get_db)) -> list[MarketOverviewRow]:
                 utilization_pct=_f(d.utilization_pct),
                 rentals_24h=int(counts.get(name, 0)),
                 median_dwell_minutes=_f(dwell.get(name)),
+                dlperf=_f(d.dlperf),
+                dlperf_per_dphtotal=_f(d.dlperf_per_dphtotal),
                 computed_at=d.computed_at,
             )
         )

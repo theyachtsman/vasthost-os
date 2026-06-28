@@ -2,7 +2,7 @@
 
 import type { MarketOverviewRow } from '@vasthost/shared-types';
 import { Card, CardContent, DataState } from '@vasthost/ui';
-import { Activity, Boxes, Flame, Snowflake, TrendingUp } from 'lucide-react';
+import { Activity, Boxes, Flame, Snowflake, TrendingUp, Zap } from 'lucide-react';
 
 import { utilColor } from '@/components/utilization';
 import { dph, num, pct } from '@/lib/format';
@@ -34,10 +34,13 @@ export function MarketSummary() {
         const coldest = [...withUtil].sort(
           (a, b) => (a.utilization_pct ?? 0) - (b.utilization_pct ?? 0),
         )[0];
+        const bestValue = rows
+          .filter((r) => r.dlperf_per_dphtotal != null)
+          .sort((a, b) => (b.dlperf_per_dphtotal ?? 0) - (a.dlperf_per_dphtotal ?? 0))[0];
 
         return (
           <Card>
-            <CardContent className="grid grid-cols-2 gap-4 py-4 md:grid-cols-3 xl:grid-cols-6">
+            <CardContent className="grid grid-cols-2 gap-4 py-4 md:grid-cols-4 xl:grid-cols-7">
               <Metric icon={Boxes} label="GPU classes" value={num(rows.length)} />
               <Metric
                 icon={Activity}
@@ -64,6 +67,17 @@ export function MarketSummary() {
                 value={coldest?.gpu_name ?? '—'}
                 sub={coldest ? `${pct(coldest.utilization_pct, 0)} · ${dph(coldest.p50_price)}` : ''}
                 valueClass="text-muted"
+              />
+              <Metric
+                icon={Zap}
+                label="Best value"
+                value={bestValue?.gpu_name ?? '—'}
+                sub={
+                  bestValue?.dlperf_per_dphtotal != null
+                    ? `${bestValue.dlperf_per_dphtotal.toFixed(0)} perf/$`
+                    : ''
+                }
+                valueClass="text-accent"
               />
             </CardContent>
           </Card>

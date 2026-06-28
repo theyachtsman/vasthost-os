@@ -116,6 +116,8 @@ export interface Distribution {
   utilization_pct: number | null;
   clearing_rate_1h: number | null;
   clearing_rate_24h: number | null;
+  dlperf?: number | null;
+  dlperf_per_dphtotal?: number | null;
 }
 
 export interface ClearingEvent {
@@ -185,6 +187,8 @@ export interface MarketOverviewRow {
   utilization_pct: number | null;
   rentals_24h: number;
   median_dwell_minutes: number | null;
+  dlperf: number | null;
+  dlperf_per_dphtotal: number | null;
   computed_at: string;
 }
 

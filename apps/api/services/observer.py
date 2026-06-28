@@ -343,6 +343,16 @@ def market_distribution_aggregate(db: Session) -> int:
             total = avail_n + rented_n
             util = round(100.0 * rented_n / total, 2) if total else None
 
+            # Value signals (median across available offers).
+            dlperfs = sorted(float(s.dlperf) for s in available if s.dlperf is not None)
+            ppds = sorted(
+                float(s.dlperf_per_dphtotal)
+                for s in available
+                if s.dlperf_per_dphtotal is not None
+            )
+            med_dlperf = percentile(dlperfs, 50)
+            med_ppd = percentile(ppds, 50)
+
             db.add(
                 MarketDistribution(
                     computed_at=now,
@@ -360,6 +370,8 @@ def market_distribution_aggregate(db: Session) -> int:
                     utilization_pct=util,
                     clearing_rate_1h=_clearing_rate(db, name, num_gpus, now, hours=1),
                     clearing_rate_24h=_clearing_rate(db, name, num_gpus, now, hours=24),
+                    dlperf=med_dlperf,
+                    dlperf_per_dphtotal=med_ppd,
                 )
             )
             produced += 1

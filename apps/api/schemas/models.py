@@ -136,6 +136,8 @@ class DistributionOut(ORMModel):
     utilization_pct: float | None
     clearing_rate_1h: float | None
     clearing_rate_24h: float | None
+    dlperf: float | None = None
+    dlperf_per_dphtotal: float | None = None
 
 
 class ClearingEventOut(ORMModel):
@@ -180,6 +182,8 @@ class MarketOverviewRow(BaseModel):
     utilization_pct: float | None
     rentals_24h: int
     median_dwell_minutes: float | None
+    dlperf: float | None
+    dlperf_per_dphtotal: float | None
     computed_at: datetime
 
 

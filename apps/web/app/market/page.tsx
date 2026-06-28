@@ -129,8 +129,11 @@ function SelectedStatsCard({ cls }: { cls: { gpu_name: string; num_gpus: number 
                 />
               </div>
               <p className="text-[11px] text-muted">
-                Median ask {dph(d.p50_price)} · {dl.label.toLowerCase()} markets clear faster and
-                support firmer pricing.
+                Median ask {dph(d.p50_price)}
+                {d.dlperf_per_dphtotal != null
+                  ? ` · ${d.dlperf_per_dphtotal.toFixed(0)} perf/$`
+                  : ''}{' '}
+                · {dl.label.toLowerCase()} markets clear faster and support firmer pricing.
               </p>
             </div>
           );

@@ -11,7 +11,7 @@ import { dph, num } from '@/lib/format';
 import { useMarketOverview } from '@/lib/hooks';
 import { useClassStore } from '@/lib/store';
 
-type Key = 'gpu' | 'price' | 'spread' | 'util' | 'supply' | 'rentals' | 'dwell';
+type Key = 'gpu' | 'price' | 'spread' | 'util' | 'value' | 'supply' | 'rentals' | 'dwell';
 
 export function MarketOverviewTable() {
   const overview = useMarketOverview();
@@ -24,6 +24,7 @@ export function MarketOverviewTable() {
     price: (r) => r.p50_price,
     spread: (r) => (r.p90_price ?? 0) - (r.p10_price ?? 0),
     util: (r) => r.utilization_pct,
+    value: (r) => r.dlperf_per_dphtotal,
     supply: (r) => r.supply_count,
     rentals: (r) => r.rentals_24h,
     dwell: (r) => r.median_dwell_minutes,
@@ -69,6 +70,7 @@ export function MarketOverviewTable() {
                   <SortHeader label="Median $/GPU·hr" sortKey="price" state={state} align="right" />
                   <SortHeader label="p10–p90" sortKey="spread" state={state} align="right" />
                   <SortHeader label="Demand (util)" sortKey="util" state={state} />
+                  <SortHeader label="Perf/$" sortKey="value" state={state} align="right" />
                   <SortHeader label="Rented/Total" sortKey="supply" state={state} align="right" />
                   <SortHeader label="Rentals 24h" sortKey="rentals" state={state} align="right" />
                   <SortHeader label="Med. dwell" sortKey="dwell" state={state} align="right" />
@@ -101,6 +103,9 @@ export function MarketOverviewTable() {
                           <UtilizationBar pct={r.utilization_pct} className="w-28" />
                           <span className={'w-10 text-[11px] ' + d.cls}>{d.label}</span>
                         </div>
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-fg">
+                        {r.dlperf_per_dphtotal != null ? r.dlperf_per_dphtotal.toFixed(0) : '—'}
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums text-muted">
                         {num(r.rented_count)}/{num(r.supply_count)}

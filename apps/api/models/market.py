@@ -80,3 +80,6 @@ class MarketDistribution(Base):
     utilization_pct: Mapped[float | None] = mapped_column(Numeric(5, 2))
     clearing_rate_1h: Mapped[float | None] = mapped_column(Numeric(5, 4))
     clearing_rate_24h: Mapped[float | None] = mapped_column(Numeric(5, 4))
+    # Median deep-learning performance + perf-per-dollar (Vast's value signal).
+    dlperf: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    dlperf_per_dphtotal: Mapped[float | None] = mapped_column(Numeric(10, 4))
