@@ -6,7 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 
 from .routes import (
-    account,
     admin,
     auth,
     earnings,
@@ -54,9 +53,10 @@ app.include_router(fleet.router, prefix="/fleet", tags=["fleet"])
 app.include_router(earnings.router, prefix="/earnings", tags=["earnings"])
 app.include_router(simulator.router, prefix="/simulator", tags=["simulator"])
 
-# Legacy single-account routes (retained for backward compatibility; the
-# two-key model supersedes them — see /me/provider-keys and /admin/platform-keys).
-app.include_router(account.router, prefix="/account", tags=["account"])
+# Note: the legacy single-account /account/* routes are removed — the two-key
+# model supersedes them entirely (see /me/provider-keys and /admin/platform-keys).
+# The VastAccount table is retained only so the migration can backfill the
+# pre-migration single-account data onto each user's connected key.
 
 
 @app.on_event("startup")

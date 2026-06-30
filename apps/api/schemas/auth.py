@@ -25,14 +25,20 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8)
     display_name: str | None = None
 
-    _email = field_validator("email")(_normalize_email)
+    @field_validator("email")
+    @classmethod
+    def _norm_email(cls, v: str) -> str:
+        return _normalize_email(v)
 
 
 class LoginRequest(BaseModel):
     email: str
     password: str = Field(min_length=1)
 
-    _email = field_validator("email")(_normalize_email)
+    @field_validator("email")
+    @classmethod
+    def _norm_email(cls, v: str) -> str:
+        return _normalize_email(v)
 
 
 class UserOut(ORMModel):
@@ -47,7 +53,10 @@ class AdminLoginRequest(BaseModel):
     email: str
     password: str = Field(min_length=1)
 
-    _email = field_validator("email")(_normalize_email)
+    @field_validator("email")
+    @classmethod
+    def _norm_email(cls, v: str) -> str:
+        return _normalize_email(v)
 
 
 class AdminOut(ORMModel):

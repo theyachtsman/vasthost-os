@@ -1,5 +1,4 @@
 import {
-  type AccountStatus,
   type AdminObserverStatus,
   type AdminOut,
   type AvailableClass,
@@ -163,29 +162,6 @@ export const useHealth = () =>
     queryFn: () => api.get<HealthResponse>('/health'),
     refetchInterval: 15_000,
   });
-
-export const useAccountStatus = () =>
-  useQuery({
-    queryKey: ['account-status'],
-    queryFn: () => api.get<AccountStatus>('/account/status'),
-    refetchInterval: 30_000,
-  });
-
-export const useConnectAccount = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (api_key: string) => api.post<AccountStatus>('/account/connect', { api_key }),
-    onSuccess: () => qc.invalidateQueries(),
-  });
-};
-
-export const useDisconnectAccount = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.del('/account/disconnect'),
-    onSuccess: () => qc.invalidateQueries(),
-  });
-};
 
 // ── Fleet ──────────────────────────────────────────────────────
 export const useMachines = (enabled = true) =>

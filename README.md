@@ -1,118 +1,94 @@
-# VastHost OS
+# GPUIQ
 
-**A host-side GPU business intelligence platform** — the primary daily interface for serious Vast.ai GPU hosts.
+**GPU marketplace intelligence + host automation.** GPUIQ has two halves:
 
-Vast.ai's dashboard answers: *what is my machine doing right now?*
+1. **Public Market Intelligence** — a live supply/demand/pricing hub for the GPU
+   marketplace, free and login-free. What rents, for how much, and how fast.
+2. **Per-host automation** — once a host connects their own provider key, GPUIQ
+   reads *their* fleet and earnings, shows where their rigs sit in the market,
+   and (later) reprices for them.
 
-VastHost OS answers:
+The product becomes powerful at the moment a guest, having seen the real Market
+Intelligence hub for free, hands over their own key and lets GPUIQ work for them.
 
-- *What is the market doing and where do I sit in it?*
-- *How much have I actually made, after fees and power?*
-- *Is my pricing costing me rentals or leaving margin on the table?*
-- *What should I do next, and why?*
+---
 
-The goal: **the user spends their time here, not on Vast's dashboard.**
+## The two-key model (read this first)
+
+There are **two kinds of key, with two jobs, two owners, two trust levels.**
+
+| | Platform key | User key |
+|---|---|---|
+| Owner | The company (admin) | Each registered user |
+| Count | One per provider | One per provider per user |
+| Job | Powers the public **Market Observer** (read-only marketplace polling) | Reads that user's **fleet / earnings**, writes their **prices** |
+| Touches user rigs? | **Never** | Only that one user's own rigs |
+| Stored | Admin Console only | User's own Settings only |
+| Table | `platform_provider_keys` | `user_provider_keys` |
+
+The Observer is **exclusively platform-key-driven** — a user key never feeds the
+shared market dataset. Both kinds are encrypted at rest (Fernet, key derived from
+`SECRET_KEY`), validated before storage (`show_user()`), masked in every response,
+and every decrypt-and-use is written to `key_access_audit` (never the key value).
+
+> A second platform key slot for **RunPod** exists in the Admin Console, and a
+> RunPod user-key input exists in Settings — both encrypted-storage-ready but
+> **inactive**: no RunPod polling/adapter runs yet. `market_source` columns and a
+> reserved RunPod color token are in place so it drops in without a redesign.
+
+---
+
+## The Observer's confirmed-rental detection — do not regress this
+
+The single most valuable piece of logic in the system, and a constraint on every
+future change:
+
+Vast's `search offers` endpoint returns a **randomized sample**, not an
+exhaustive listing. So **absence is not evidence** — an offer vanishing between
+polls usually means it wasn't sampled, not that it was rented. Absence-based
+"clearing detection" is pure noise.
+
+Instead, the Observer polls **both** the available set (`rentable=true`) and the
+unavailable set (`rentable=false`) each cycle, and records a **confirmed rental**
+only as an **observed state transition**: an offer seen as *available* and later
+seen as *unavailable*. Sampling can make us miss rentals (false negatives) but
+never invent them (no false positives) — every recorded event is a positively
+observed transition.
+
+**Any future change to clearing/rental detection must preserve this two-set
+polling + transition approach.** Do not silently swap back to absence-based
+detection because it looks simpler. (See `apps/api/services/observer.py`.)
 
 ---
 
 ## Surfaces
 
-| # | Surface | What it replaces |
-|---|---|---|
-| 1 | Market Intelligence | Vast's non-existent host market view |
-| 2 | Earnings & Financials | Vast's buried earnings tab |
-| 3 | Fleet Health & Utilization | Vast's machine list |
-| 4 | Pricing Control Center | Manual price editing on Vast |
-| 5 | Offer Management | Scattered CLI commands |
-| 6 | Analytics & Insights | Nothing — Vast has none |
+| Surface | Visibility |
+|---|---|
+| Market Intelligence (homepage `/`) | **Public** — no login |
+| Dashboard | Signed-in |
+| Earnings & Financials | Signed-in |
+| Fleet Health | Signed-in (real machines vs `is_simulated` rigs are visibly distinct) |
+| Pricing Control / Offer Management / Analytics | Signed-in (stubs) |
+| Alerting | Signed-in (offer-expiry) |
+| Simulator, Settings | Signed-in |
+| Admin Console (`/admin`) | **Separate** admin login, separate cookie scope |
 
-## Operating principle (non-negotiable)
-
-> Every phase ends in a usable, deployable product. Do not begin a later phase until the previous one is stable, demoed, and committed.
-
-The **Market Observer starts in Phase 0 and never stops.** The demand dataset cannot be backfilled — every poll that doesn't run is data that's gone forever.
+Private routes are gated **server-side** in `apps/web/middleware.ts` — direct
+navigation to a gated route redirects to sign-in with no flash of content.
 
 ---
 
-## Tech stack (locked)
+## Tech stack
 
 | Layer | Stack |
 |---|---|
-| Frontend | Next.js 15+ (App Router), TypeScript, TailwindCSS, ShadCN UI, React Query, Zustand |
+| Frontend | Next.js 15 (App Router), TypeScript, Tailwind, React Query, Zustand |
 | Backend | FastAPI, SQLAlchemy, Alembic, PostgreSQL, Redis |
 | Workers | Celery + Celery Beat (Redis broker) |
-| Vast SDK | `vastai` Python package |
-| Infra | Docker, Docker Compose, Nginx |
-
-## Monorepo structure
-
-```text
-repo/
-  apps/
-    web/          # Next.js 15 dashboard
-    api/          # FastAPI
-    worker/       # Celery workers + beat scheduler
-  packages/
-    ui/           # shared ShadCN primitives
-    shared-types/ # TypeScript types derived from API schemas
-  infrastructure/
-    docker/
-    nginx/
-  docs/
-  scripts/
-```
-
-## Networking (hard requirement)
-
-Dashboard runs on **port 8111**, reachable from **any LAN browser**.
-
-- Next dev binds `0.0.0.0`: `"dev": "next dev -H 0.0.0.0 -p 8111"`
-- No hardcoded `localhost` in client code — same-origin proxy via `next.config.js` rewrites; client always calls `/api/...`.
-- Docker Compose maps `"8111:8111"`.
-- FastAPI CORS allows all origins in dev, gated by `ALLOW_ALL_CORS=true`.
-- Host firewall: `ufw allow 8111/tcp` (see `docs/lan-access.md`).
-
-**Acceptance:** a second LAN machine opens `http://<host-ip>:8111`, the dashboard loads, and the health widget reads live.
-
-## Environment variables
-
-```bash
-# Vast
-VAST_API_KEY=                       # user's personal Vast account key
-
-# Observer — initial watched class
-VAST_OBSERVER_DEFAULT_GPU=RTX_4090
-VAST_OBSERVER_DEFAULT_NUM_GPUS=1
-
-# App
-API_INTERNAL_URL=http://api:8000
-DATABASE_URL=postgresql://postgres:postgres@postgres:5432/vasthost
-REDIS_URL=redis://redis:6379/0
-SECRET_KEY=                         # for encrypting stored API keys
-
-# Dev flags
-ALLOW_ALL_CORS=true
-```
-
----
-
-## Phased roadmap
-
-| Phase | Deliverable |
-|---|---|
-| **0** | Foundation + real Vast data + Observer live + all six surface stubs |
-| **1** | Pricing Control Center — recommend-only |
-| **2** | Bounded auto-repricing against simulated host within configured rails |
-| **3** | Offer Management surface (bulk ops, expiry alerts, backfill config) |
-| **4** | Demand-curve engine (data-gated) |
-| **5** | Analytics & Insights surface |
-| **6** | Real host adapter |
-| **7** | Multi-tenant SaaS |
-| **8** | Multi-provider expansion (RunPod + others) |
-
-The full build specification, including the complete database schema, Vast API field
-reference, Celery worker schedule, FastAPI endpoint surface, and the Phase 0
-Definition of Done, lives in [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md).
+| Auth | Opaque session tokens (hashed at rest), bcrypt passwords; separate user/admin cookie scopes |
+| Vast SDK | `vastai` **1.1.3** (pinned — 0.2.7 is broken) |
+| Infra | Docker Compose |
 
 ---
 
@@ -123,9 +99,10 @@ Prerequisites: Docker + Docker Compose v2.
 ```bash
 # 1. Configure environment
 cp .env.example .env
-# Generate a SECRET_KEY (used to encrypt your stored Vast API key at rest):
+
+# Generate a SECRET_KEY (encrypts stored provider keys at rest):
 python3 -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(48))" >> .env
-#   …then edit .env and set that SECRET_KEY value (and optionally VAST_API_KEY).
+#   …then edit .env: set that SECRET_KEY, and set ADMIN_SEED_EMAIL / ADMIN_SEED_PASSWORD.
 
 # 2. Bring up the full stack (db, redis, api, worker, beat, web)
 docker compose up -d
@@ -134,72 +111,102 @@ docker compose up -d
 #    http://localhost:8111   (or http://<host-lan-ip>:8111 from another machine)
 ```
 
-`docker compose up` starts Postgres + Redis, runs Alembic migrations
-automatically, launches the FastAPI API, the Celery worker + beat scheduler
-(the **Market Observer** begins polling immediately), and the Next.js dashboard
-on port **8111**.
+`docker compose up` runs Alembic migrations automatically, launches the API, the
+Celery worker + beat (the **Market Observer** starts polling immediately), and the
+Next.js dashboard on port **8111**. On first boot the API **seeds one admin** from
+`ADMIN_SEED_EMAIL` / `ADMIN_SEED_PASSWORD` (idempotent — skipped if an admin
+already exists). **Real admin credentials live only in the untracked `.env`.**
 
-Check health through the proxy:
+Health through the proxy: `curl http://localhost:8111/api/health`
+
+---
+
+## End-to-end demo: guest → signup → connect key → your own data
+
+On the LAN (`http://<host-ip>:8111`):
+
+1. **Guest.** Land on `/` — the live Market Intelligence hub, no login, with a
+   "see where your rig ranks" sign-up CTA. Try navigating directly to `/fleet`:
+   you're redirected to `/login` (no protected content flashes).
+2. **Admin (one-time).** Go to `/admin/login`, sign in with the seeded admin.
+   Under **Platform Vast key**, paste the company Vast key — it validates and the
+   Observer polls with it. (The migration also seeds this from the pre-existing
+   account, so polling never gaps.) The RunPod slot accepts a key, stores it
+   encrypted, stays inactive.
+3. **Sign up.** Back on the app, `/signup` → you land on `/dashboard` with full
+   nav.
+4. **Connect your key.** **Settings → Vast.ai** → paste your personal Vast key.
+   It validates (`show_user()`), encrypts, stores, detects scopes, and kicks an
+   initial sync — your machines and earnings appear within ~60s, attributed to
+   your `user_provider_keys` row (pre-migration data is backfilled onto it).
+5. **See your own data.** Fleet Health, Earnings, and the signed-in Market hub now
+   overlay *your* rigs. A second user with a different key sees only their own
+   machines (scoping is enforced at the query level, not just the UI).
+6. **Disconnect.** Settings → Disconnect halts that user's scheduled syncs and
+   deletes the key row; history is retained (ownership set null), not destroyed.
+
+### Connecting a Vast key — scoped permissions
+
+When you create a restricted Vast key, grant only:
+
+- **Machine read** — sync your fleet & utilization
+- **Machine write / pricing** — let GPUIQ adjust your prices (used later)
+- **Billing read** — sync earnings & balance
+
+**Do NOT grant billing-write or key-management permissions.** GPUIQ never needs
+them; omitting them limits the blast radius if a key ever leaks. Settings links
+straight to Vast's key page and repeats this warning.
+
+---
+
+## Environment variables
+
+See [`.env.example`](.env.example). Key ones:
+
+| Variable | Purpose |
+|---|---|
+| `SECRET_KEY` | **Required.** Encrypts stored platform + user keys at rest |
+| `ADMIN_SEED_EMAIL` / `ADMIN_SEED_PASSWORD` | Seed the first admin on boot (untracked `.env` only) |
+| `DATABASE_URL` | Postgres (SQLAlchemy + psycopg) |
+| `REDIS_URL` | Celery broker / result backend |
+| `API_INTERNAL_URL` | Internal API host the Next.js proxy forwards `/api/*` to |
+| `VAST_API_KEY` | Optional legacy single-account key (validated on startup) |
+| `ALLOW_ALL_CORS`, `WEB_PORT` | Dev flag; dashboard port (default 8111) |
+
+---
+
+## Local development (without Docker)
 
 ```bash
-curl http://localhost:8111/api/health
-```
+pnpm install
+pnpm --filter @vasthost/web dev    # dashboard on 0.0.0.0:8111
 
-### Connect your Vast account
-
-1. Open the dashboard → **Settings**.
-2. Paste your Vast.ai API key and click **Connect**. The key is validated
-   against Vast (`show_user`), stored **encrypted at rest**, and an initial
-   fleet + earnings sync kicks off — your machines and earnings appear within
-   ~60 seconds.
-3. Under **Observer — Watched GPU Classes**, add the `(gpu_name, num_gpus,
-   region)` tuples you want the Market Observer to track. The demand dataset
-   **cannot be backfilled**, so add the classes you care about early.
-
-### LAN access
-
-The dashboard is reachable from any machine on your network. See
-[`docs/lan-access.md`](docs/lan-access.md). One-time firewall step on the host:
-
-```bash
-sudo ufw allow 8111/tcp
-```
-
-### Local development (without Docker)
-
-```bash
-pnpm install                      # install JS workspace deps
-pnpm --filter @vasthost/web dev   # dashboard on 0.0.0.0:8111
-
-# API (separate shell) — needs a local Postgres + Redis and a populated .env
-cd apps/api
+cd apps/api                        # needs local Postgres + Redis + populated .env
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 alembic upgrade head
 uvicorn app.main:app --reload --port 8000
-celery -A worker.celery_app worker --loglevel=info   # worker
-celery -A worker.celery_app beat --loglevel=info     # beat scheduler
+celery -A worker.celery_app worker --loglevel=info
+celery -A worker.celery_app beat --loglevel=info
 ```
 
-## Environment variables
+(The JS workspace scope is still `@vasthost/*` internally; only user-facing
+naming is GPUIQ.)
 
-See [`.env.example`](.env.example) for the full reference. Key ones:
+---
 
-| Variable | Purpose |
-|---|---|
-| `VAST_API_KEY` | Optional: validated on API startup; the primary key is set in-app via Settings |
-| `SECRET_KEY` | **Required.** Encrypts stored Vast API keys at rest |
-| `DATABASE_URL` | Postgres connection (SQLAlchemy + psycopg) |
-| `REDIS_URL` | Celery broker / result backend |
-| `API_INTERNAL_URL` | Internal API host the Next.js proxy forwards `/api/*` to |
-| `VAST_OBSERVER_DEFAULT_GPU` / `_NUM_GPUS` | Seeds the first watched class |
-| `ALLOW_ALL_CORS` | Dev flag — allow all origins on the API |
-| `WEB_PORT` | Host port the dashboard binds (default 8111) |
+## Migrations
+
+Additive only. `0001`/`0002` (Phase 0) are never collapsed. `0003` adds the auth +
+two-key tables, a nullable `user_provider_key_id` on the private pool (SET NULL on
+disconnect → history retained), the `market_source` seam on the Observer tables,
+and `is_simulated` on simulated rigs — and seeds the platform key from any
+pre-existing account so the Observer never gaps.
 
 ---
 
 ## Status
 
-🚧 **Phase 0 — Foundation & Full Stack Bootstrap** — backend, workers, and all six
-surfaces built; web app and API verified building/importing cleanly. Full
-`docker compose up` smoke test pending on a Docker-enabled host.
+Migration to the GPUIQ architecture (two-key model, public/private surfaces,
+multi-tenant auth, admin console) complete. Stack builds; `docker compose up`
+smoke test runs on a Docker-enabled host.
