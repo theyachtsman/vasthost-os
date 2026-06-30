@@ -21,14 +21,17 @@ import { useClassStore } from '@/lib/store';
 
 const AXIS = { stroke: 'hsl(218 10% 58%)', fontSize: 11 };
 
-function pointColor(util: number): string {
-  if (util >= 70) return 'hsl(160 70% 45%)';
-  if (util >= 45) return 'hsl(43 90% 55%)';
-  if (util >= 20) return 'hsl(25 90% 55%)';
+// Color keys off liquidity-weighted demand (0..1), not raw utilization, so a thin
+// 100%-rented dot reads as dim rather than hot.
+function pointColor(demand: number): string {
+  const d = demand * 100;
+  if (d >= 60) return 'hsl(160 70% 45%)';
+  if (d >= 40) return 'hsl(43 90% 55%)';
+  if (d >= 20) return 'hsl(25 90% 55%)';
   return 'hsl(222 12% 40%)';
 }
 
-export function PriceDemandScatter() {
+export function PriceDemandScatter({ owned }: { owned?: Set<string> }) {
   const overview = useMarketOverview();
   const setSelected = useClassStore((s) => s.setSelected);
 
@@ -50,7 +53,9 @@ export function PriceDemandScatter() {
               x: r.p50_price as number,
               y: r.utilization_pct as number,
               z: r.supply_count ?? 1,
+              demand: r.demand_score ?? 0,
               name: r.gpu_name,
+              mine: owned?.has(r.gpu_name) ?? false,
             }));
           return (
             <div className="flex flex-col gap-2">
@@ -94,9 +99,13 @@ export function PriceDemandScatter() {
                         const p = payload[0].payload as (typeof data)[number];
                         return (
                           <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs">
-                            <div className="font-medium text-fg">{p.name}</div>
+                            <div className="font-medium text-fg">
+                              {p.name}
+                              {p.mine ? <span className="ml-1 text-accent">· your fleet</span> : null}
+                            </div>
                             <div className="text-muted">Median {dph(p.x)}</div>
                             <div className="text-muted">{Math.round(p.y)}% utilized</div>
+                            <div className="text-muted">demand {Math.round(p.demand * 100)}/100</div>
                             <div className="text-muted">{num(p.z)} offers</div>
                           </div>
                         );
@@ -110,16 +119,24 @@ export function PriceDemandScatter() {
                       }
                     >
                       {data.map((d, i) => (
-                        <Cell key={i} fill={pointColor(d.y)} fillOpacity={0.8} />
+                        <Cell
+                          key={i}
+                          fill={pointColor(d.demand)}
+                          fillOpacity={0.8}
+                          stroke={d.mine ? 'hsl(var(--accent, 243 75% 65%))' : undefined}
+                          strokeWidth={d.mine ? 2 : 0}
+                        />
                       ))}
                     </Scatter>
                   </ScatterChart>
                 </ResponsiveContainer>
               </div>
               <p className="text-[11px] text-muted">
-                Each dot is a GPU (bubble size = supply). Higher = more rented (stronger demand),
-                right = pricier. Cards in the top band are in demand; expensive ≠ always busy. Click
-                a dot to drill in.
+                Each dot is a GPU (bubble size = supply, color = liquidity-weighted demand). Higher =
+                more utilized, right = pricier. Green = genuinely hot; a small dim dot high up is a
+                thinly-supplied 100% that isn't real demand.
+                {owned && owned.size > 0 ? ' Outlined dots are GPUs you host.' : ''} Click a dot to
+                drill in.
               </p>
             </div>
           );

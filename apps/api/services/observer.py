@@ -198,6 +198,7 @@ def market_observer_poll(db: Session) -> int:
                 observed_at=now,
                 offer_id=int(offer_id),
                 machine_id=o.get("machine_id"),
+                host_id=o.get("host_id"),
                 gpu_name=o.get("gpu_name") or name,
                 num_gpus=o.get("num_gpus"),
                 gpu_ram_mb=o.get("gpu_ram"),
@@ -270,6 +271,47 @@ CLEARING_LOOKBACK_HOURS = 12
 CLEARING_DEDUP_HOURS = 12
 
 
+# How established a listing must be (in available polls) to earn each grade.
+CONFIDENCE_HIGH_POLLS = 3
+CONFIDENCE_MED_POLLS = 2
+
+
+def _grade_confidence(
+    polls: int, verified: str | None, dwell_minutes: int | None
+) -> tuple[str, str]:
+    """Grade how strong a demand signal a confirmed rental is, and explain why.
+
+    Every clearing event is a *confirmed* rental (an offer we saw available is now
+    unavailable — sampling can only make us miss events, never invent them). What
+    varies is how trustworthy the listing was as a market signal:
+
+    * HIGH   — established listing (seen ≥3 available polls) AND a verified host.
+    * MEDIUM — established (≥2 polls) OR verified, but not both.
+    * LOW    — thin evidence: first/second sighting and unverified.
+
+    Returns (grade, reason) where reason is a short human string the UI surfaces
+    so the user understands the grade instead of trusting an opaque label.
+    """
+    is_verified = (verified or "").lower() == "verified"
+    established_high = polls >= CONFIDENCE_HIGH_POLLS
+    established_med = polls >= CONFIDENCE_MED_POLLS
+
+    if established_high and is_verified:
+        grade = "HIGH"
+    elif established_med or is_verified:
+        grade = "MEDIUM"
+    else:
+        grade = "LOW"
+
+    parts = [
+        "verified host" if is_verified else "unverified host",
+        f"seen {polls} poll{'s' if polls != 1 else ''} before renting",
+    ]
+    if dwell_minutes is not None:
+        parts.append(f"{dwell_minutes}m on market")
+    return grade, " · ".join(parts)
+
+
 def _detect_clearing(
     db: Session, gpu_name: str, unavailable_ids: set[int], now: datetime
 ) -> None:
@@ -327,11 +369,11 @@ def _detect_clearing(
         if last_avail_snap is None:
             continue
 
-        # All events are confirmed rentals; grade by how established the listing
-        # was (a long-lived offer that rents is a stronger demand signal).
-        confidence = "HIGH"
-        if (avail_polls or 0) < 2:
-            confidence = "MEDIUM"
+        confidence, reason = _grade_confidence(
+            polls=avail_polls or 0,
+            verified=last_avail_snap.verified,
+            dwell_minutes=dwell_minutes,
+        )
 
         db.add(
             ClearingEvent(
@@ -345,6 +387,7 @@ def _detect_clearing(
                 dwell_minutes=dwell_minutes,
                 is_partial_fill=False,
                 confidence=confidence,
+                confidence_reason=reason,
             )
         )
 
@@ -389,17 +432,30 @@ def market_distribution_aggregate(db: Session) -> int:
             available = [s for s in group if s.rentable]
             unavailable = [s for s in group if not s.rentable]
             # Price distribution is the ASKING market — available offers only.
+            # But when a size is fully rented there are no asks, which used to
+            # blank the price (and stall the price-over-time chart). Fall back to
+            # the rented offers' last-known ask so price is never empty, and label
+            # the basis so the UI can mark it as "last rented".
             prices = sorted(float(s.price_gpu) for s in available if s.price_gpu is not None)
+            price_basis = "ask"
+            if not prices:
+                prices = sorted(
+                    float(s.price_gpu) for s in unavailable if s.price_gpu is not None
+                )
+                if prices:
+                    price_basis = "last-rented"
             avail_n = len(available)
             rented_n = len(unavailable)
             total = avail_n + rented_n
             util = round(100.0 * rented_n / total, 2) if total else None
 
-            # Value signals (median across available offers).
-            dlperfs = sorted(float(s.dlperf) for s in available if s.dlperf is not None)
+            # Value signals (median). Prefer available offers; fall back to the
+            # full group when the size is fully rented so these never blank out.
+            value_src = available or group
+            dlperfs = sorted(float(s.dlperf) for s in value_src if s.dlperf is not None)
             ppds = sorted(
                 float(s.dlperf_per_dphtotal)
-                for s in available
+                for s in value_src
                 if s.dlperf_per_dphtotal is not None
             )
             med_dlperf = percentile(dlperfs, 50)
@@ -424,6 +480,7 @@ def market_distribution_aggregate(db: Session) -> int:
                     clearing_rate_24h=_clearing_rate(db, name, num_gpus, now, hours=24),
                     dlperf=med_dlperf,
                     dlperf_per_dphtotal=med_ppd,
+                    price_basis=price_basis,
                 )
             )
             produced += 1

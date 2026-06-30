@@ -7,6 +7,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.config import settings
+
 
 class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -138,6 +140,7 @@ class DistributionOut(ORMModel):
     clearing_rate_24h: float | None
     dlperf: float | None = None
     dlperf_per_dphtotal: float | None = None
+    price_basis: str = "ask"  # 'ask' | 'last-rented'
 
 
 class ClearingEventOut(ORMModel):
@@ -152,6 +155,7 @@ class ClearingEventOut(ORMModel):
     dwell_minutes: int | None
     is_partial_fill: bool
     confidence: str
+    confidence_reason: str | None = None
 
 
 class ObserverStatus(BaseModel):
@@ -168,6 +172,40 @@ class AvailableClass(BaseModel):
     supply_count: int | None
 
 
+class MarketMeta(BaseModel):
+    """Cross-cutting market context for the UI: the fee assumption used to derive
+    host-receives from renter-pay, and the Observer poll cadence (for the live
+    indicator)."""
+
+    fee_pct: float
+    poll_interval_seconds: int
+    last_poll_at: datetime | None
+
+
+class MarketListingRow(BaseModel):
+    """One live server/offer — the per-server detail behind the aggregates."""
+
+    offer_id: int
+    machine_id: int | None
+    host_id: int | None
+    market_source: str
+    gpu_name: str
+    num_gpus: int | None
+    gpu_ram_mb: int | None
+    gpu_max_power_w: int | None
+    price_gpu: float | None  # renter-pay, per GPU/hr
+    price_gpu_host: float | None  # host-receives = renter * (1 - fee)
+    dph_total: float | None  # renter-pay total (all GPUs + base)
+    dlperf: float | None
+    dlperf_per_dphtotal: float | None
+    reliability: float | None
+    verified: str | None
+    geolocation: str | None
+    rented: bool | None
+    end_date: datetime | None
+    observed_at: datetime
+
+
 class MarketOverviewRow(BaseModel):
     gpu_name: str
     num_gpus: int
@@ -180,10 +218,12 @@ class MarketOverviewRow(BaseModel):
     available_count: int | None
     rented_count: int | None
     utilization_pct: float | None
+    demand_score: float | None  # liquidity-weighted demand (ranking metric)
     rentals_24h: int
     median_dwell_minutes: float | None
     dlperf: float | None
     dlperf_per_dphtotal: float | None
+    price_basis: str = "ask"
     computed_at: datetime
 
 
@@ -198,7 +238,9 @@ class SimulatedHostIn(BaseModel):
     reliability: float = 0.90
     geolocation: str | None = None
     kwh_rate: float | None = None
-    vast_service_fee_pct: float = 0.20
+    # Defaults to the platform-wide market fee assumption so the simulator and the
+    # Market hub's host-receives figures agree (configurable via MARKET_FEE_PCT).
+    vast_service_fee_pct: float = Field(default_factory=lambda: settings.MARKET_FEE_PCT)
     is_active: bool = True
 
 

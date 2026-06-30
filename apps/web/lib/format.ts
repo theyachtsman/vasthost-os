@@ -11,6 +11,16 @@ export function dph(value: number | null | undefined): string {
   return `$${value.toFixed(4)}/hr`;
 }
 
+// Renter-pay → host-receives. Market prices are post-Vast-fee (what the renter
+// pays); the host pockets renter * (1 - fee). feePct is a fraction (0.25 = 25%).
+export function hostTake(
+  renter: number | null | undefined,
+  feePct: number | null | undefined,
+): number | null {
+  if (renter == null || feePct == null) return null;
+  return renter * (1 - feePct);
+}
+
 export function pct(value: number | null | undefined, digits = 1): string {
   if (value == null) return '—';
   return `${value.toFixed(digits)}%`;

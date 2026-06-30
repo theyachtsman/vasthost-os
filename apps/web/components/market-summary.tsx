@@ -23,16 +23,18 @@ export function MarketSummary() {
       skeleton={<Card className="h-20 animate-pulse" />}
     >
       {(rows) => {
-        const withUtil = rows.filter((r) => r.utilization_pct != null && (r.supply_count ?? 0) > 0);
+        const withUtil = rows.filter((r) => r.demand_score != null && (r.supply_count ?? 0) > 0);
         const totalSupply = rows.reduce((a, r) => a + (r.supply_count ?? 0), 0);
         const totalRented = rows.reduce((a, r) => a + (r.rented_count ?? 0), 0);
         const totalRentals = rows.reduce((a, r) => a + r.rentals_24h, 0);
         const marketUtil = totalSupply ? (100 * totalRented) / totalSupply : null;
+        // Hottest/coldest by liquidity-weighted demand, not raw utilization, so a
+        // thin 100%-rented class doesn't masquerade as the hottest card.
         const hottest = [...withUtil].sort(
-          (a, b) => (b.utilization_pct ?? 0) - (a.utilization_pct ?? 0),
+          (a, b) => (b.demand_score ?? 0) - (a.demand_score ?? 0),
         )[0];
         const coldest = [...withUtil].sort(
-          (a, b) => (a.utilization_pct ?? 0) - (b.utilization_pct ?? 0),
+          (a, b) => (a.demand_score ?? 0) - (b.demand_score ?? 0),
         )[0];
         const bestValue = rows
           .filter((r) => r.dlperf_per_dphtotal != null)

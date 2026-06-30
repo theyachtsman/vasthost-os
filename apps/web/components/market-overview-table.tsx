@@ -7,22 +7,33 @@ import { useMemo, useState } from 'react';
 import { SortHeader, useSort } from '@/components/sort-header';
 import { UtilizationBar, demandLabel } from '@/components/utilization';
 import { Widget } from '@/components/widget';
-import { dph, num } from '@/lib/format';
+import { dph, hostTake, num, pct } from '@/lib/format';
 import { useMarketOverview } from '@/lib/hooks';
 import { useClassStore } from '@/lib/store';
 
-type Key = 'gpu' | 'price' | 'spread' | 'util' | 'value' | 'supply' | 'rentals' | 'dwell';
+type Key = 'gpu' | 'price' | 'spread' | 'demand' | 'util' | 'value' | 'supply' | 'rentals' | 'dwell';
 
-export function MarketOverviewTable() {
+// demand_score arrives as a 0..1 fraction; render it on the same 0..100 scale the
+// utilization bar/label already understand (Hot/Warm/Soft/Cold).
+const demandPct = (r: MarketOverviewRow) => (r.demand_score ?? 0) * 100;
+
+export function MarketOverviewTable({
+  owned,
+  feePct,
+}: {
+  owned?: Set<string>;
+  feePct?: number | null;
+}) {
   const overview = useMarketOverview();
   const setSelected = useClassStore((s) => s.setSelected);
   const selected = useClassStore((s) => s.selected);
   const [filter, setFilter] = useState('');
 
-  const { state, sort } = useSort<MarketOverviewRow, Key>('util', 'desc', {
+  const { state, sort } = useSort<MarketOverviewRow, Key>('demand', 'desc', {
     gpu: (r) => r.gpu_name,
     price: (r) => r.p50_price,
     spread: (r) => (r.p90_price ?? 0) - (r.p10_price ?? 0),
+    demand: (r) => r.demand_score,
     util: (r) => r.utilization_pct,
     value: (r) => r.dlperf_per_dphtotal,
     supply: (r) => r.supply_count,
@@ -69,7 +80,8 @@ export function MarketOverviewTable() {
                   <SortHeader label="GPU" sortKey="gpu" state={state} />
                   <SortHeader label="Median $/GPU·hr" sortKey="price" state={state} align="right" />
                   <SortHeader label="p10–p90" sortKey="spread" state={state} align="right" />
-                  <SortHeader label="Demand (util)" sortKey="util" state={state} />
+                  <SortHeader label="Demand" sortKey="demand" state={state} />
+                  <SortHeader label="Util (raw)" sortKey="util" state={state} align="right" />
                   <SortHeader label="Perf/$" sortKey="value" state={state} align="right" />
                   <SortHeader label="Rented/Total" sortKey="supply" state={state} align="right" />
                   <SortHeader label="Rentals 24h" sortKey="rentals" state={state} align="right" />
@@ -78,8 +90,9 @@ export function MarketOverviewTable() {
               </thead>
               <tbody>
                 {data.map((r) => {
-                  const d = demandLabel(r.utilization_pct);
+                  const d = demandLabel(demandPct(r));
                   const active = r.gpu_name === selected.gpu_name;
+                  const mine = owned?.has(r.gpu_name) ?? false;
                   return (
                     <tr
                       key={r.gpu_name}
@@ -88,21 +101,36 @@ export function MarketOverviewTable() {
                       }
                       className={
                         'cursor-pointer border-b border-border/50 hover:bg-border/20 ' +
-                        (active ? 'bg-accent/10' : '')
+                        (mine ? 'bg-accent/10 ring-1 ring-inset ring-accent/30 ' : '') +
+                        (active && !mine ? 'bg-accent/10' : '')
                       }
                     >
-                      <td className="px-4 py-2 font-medium text-fg">{r.gpu_name}</td>
+                      <td className="px-4 py-2 font-medium text-fg">
+                        <span className="flex items-center gap-2">
+                          {r.gpu_name}
+                          {mine ? <Badge variant="accent">your fleet</Badge> : null}
+                        </span>
+                      </td>
                       <td className="px-4 py-2 text-right tabular-nums text-fg">
                         {dph(r.p50_price)}
+                        <div className="text-[10px] text-emerald-400/80">
+                          {dph(hostTake(r.p50_price, feePct ?? null))} net
+                        </div>
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums text-muted">
                         {dph(r.p10_price)}–{dph(r.p90_price)}
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-2">
-                          <UtilizationBar pct={r.utilization_pct} className="w-28" />
+                          <UtilizationBar pct={demandPct(r)} showLabel={false} className="w-28" />
                           <span className={'w-10 text-[11px] ' + d.cls}>{d.label}</span>
                         </div>
+                      </td>
+                      <td
+                        className="px-4 py-2 text-right tabular-nums text-muted"
+                        title="Raw utilization (rented ÷ total). Demand weights this by liquidity so a thin 100% doesn't read as hot."
+                      >
+                        {pct(r.utilization_pct, 0)}
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums text-fg">
                         {r.dlperf_per_dphtotal != null ? r.dlperf_per_dphtotal.toFixed(0) : '—'}
@@ -127,11 +155,15 @@ export function MarketOverviewTable() {
                 })}
               </tbody>
             </table>
-            <div className="flex items-center justify-between px-4 pt-2 text-[11px] text-muted">
-              <span>{data.length} GPU classes · click a row to drill in below</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-2 text-[11px] text-muted">
+              <span>
+                {data.length} GPU classes · ranked by liquidity-weighted demand (a thin 100%-rented
+                class won't top the board) · click a row to drill in
+              </span>
               <span className="flex items-center gap-2">
-                <Badge variant="success">Hot ≥70%</Badge>
-                <Badge variant="warning">Warm ≥45%</Badge>
+                {owned && owned.size > 0 ? <Badge variant="accent">your fleet</Badge> : null}
+                <Badge variant="success">Hot</Badge>
+                <Badge variant="warning">Warm</Badge>
                 <Badge variant="muted">Soft/Cold</Badge>
               </span>
             </div>

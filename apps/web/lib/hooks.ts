@@ -6,6 +6,8 @@ import {
   type DailyEarningPoint,
   type Distribution,
   type EarningsSummary,
+  type MarketListingRow,
+  type MarketMeta,
   type MarketOverviewRow,
   type HealthResponse,
   type Machine,
@@ -276,6 +278,28 @@ export const useMarketSizes = (gpu_name: string) =>
     refetchInterval: 60_000,
   });
 
+export const useMarketMeta = () =>
+  useQuery({
+    queryKey: ['market-meta'],
+    queryFn: () => api.get<MarketMeta>('/market/meta'),
+    refetchInterval: 30_000,
+  });
+
+export const useMarketListings = (
+  gpu_name: string,
+  opts: { num_gpus?: number; rented?: boolean | null } = {},
+) =>
+  useQuery({
+    queryKey: ['market-listings', gpu_name, opts.num_gpus, opts.rented],
+    queryFn: () => {
+      const params = new URLSearchParams({ gpu_name });
+      if (opts.num_gpus != null) params.set('num_gpus', String(opts.num_gpus));
+      if (opts.rented != null) params.set('rented', String(opts.rented));
+      return api.get<MarketListingRow[]>(`/market/listings?${params.toString()}`);
+    },
+    refetchInterval: 60_000,
+  });
+
 // ── Watched classes ────────────────────────────────────────────
 export const useWatchedClasses = () =>
   useQuery({
@@ -301,10 +325,11 @@ export const useRemoveWatchedClass = () => {
 };
 
 // ── Simulator ──────────────────────────────────────────────────
-export const useSimulatedHosts = () =>
+export const useSimulatedHosts = (enabled = true) =>
   useQuery({
     queryKey: ['simulated-hosts'],
     queryFn: () => api.get<SimulatedHost[]>('/simulator/hosts'),
+    enabled,
   });
 
 export const useSaveSimulatedHost = () => {

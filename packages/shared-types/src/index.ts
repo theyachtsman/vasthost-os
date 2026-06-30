@@ -166,6 +166,7 @@ export interface Distribution {
   clearing_rate_24h: number | null;
   dlperf?: number | null;
   dlperf_per_dphtotal?: number | null;
+  price_basis?: 'ask' | 'last-rented';
 }
 
 export interface ClearingEvent {
@@ -180,6 +181,7 @@ export interface ClearingEvent {
   dwell_minutes: number | null;
   is_partial_fill: boolean;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  confidence_reason?: string | null;
 }
 
 export interface ObserverStatus {
@@ -222,6 +224,34 @@ export interface AvailableClass {
   supply_count: number | null;
 }
 
+export interface MarketMeta {
+  fee_pct: number;
+  poll_interval_seconds: number;
+  last_poll_at: string | null;
+}
+
+export interface MarketListingRow {
+  offer_id: number;
+  machine_id: number | null;
+  host_id: number | null;
+  market_source: string;
+  gpu_name: string;
+  num_gpus: number | null;
+  gpu_ram_mb: number | null;
+  gpu_max_power_w: number | null;
+  price_gpu: number | null; // renter-pay per GPU/hr
+  price_gpu_host: number | null; // host-receives = renter * (1 - fee)
+  dph_total: number | null;
+  dlperf: number | null;
+  dlperf_per_dphtotal: number | null;
+  reliability: number | null;
+  verified: string | null;
+  geolocation: string | null;
+  rented: boolean | null;
+  end_date: string | null;
+  observed_at: string;
+}
+
 export interface MarketOverviewRow {
   gpu_name: string;
   num_gpus: number;
@@ -234,10 +264,12 @@ export interface MarketOverviewRow {
   available_count: number | null;
   rented_count: number | null;
   utilization_pct: number | null;
+  demand_score: number | null;
   rentals_24h: number;
   median_dwell_minutes: number | null;
   dlperf: number | null;
   dlperf_per_dphtotal: number | null;
+  price_basis?: 'ask' | 'last-rented';
   computed_at: string;
 }
 

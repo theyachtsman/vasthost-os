@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     VAST_OBSERVER_DEFAULT_GPU: str = "RTX_4090"
     VAST_OBSERVER_DEFAULT_NUM_GPUS: int = 1
 
+    # Market fee model — the marketplace prices we observe are renter-pay (Vast's
+    # fee already included). host-receives = renter * (1 - MARKET_FEE_PCT). Single
+    # source of truth; the simulator's per-host service fee defaults to this too.
+    MARKET_FEE_PCT: float = 0.25
+
     # Infra
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@postgres:5432/vasthost"
     REDIS_URL: str = "redis://redis:6379/0"

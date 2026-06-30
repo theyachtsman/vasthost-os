@@ -5,12 +5,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from db.session import get_db
 from models import ClearingEvent, MarketDistribution, OfferSnapshot, WatchedClass
 from schemas.models import (
     AvailableClass,
     ClearingEventOut,
     DistributionOut,
+    MarketListingRow,
+    MarketMeta,
     MarketOverviewRow,
     ObserverStatus,
     WatchedClassIn,
@@ -116,6 +119,85 @@ def available_classes(db: Session = Depends(get_db)) -> list[AvailableClass]:
     return out
 
 
+@router.get("/meta", response_model=MarketMeta)
+def meta(db: Session = Depends(get_db)) -> MarketMeta:
+    """Cross-cutting context for the UI: the fee assumption used to derive
+    host-receives from renter-pay, the poll cadence, and the last poll time (so
+    the client can render a live/updating indicator)."""
+    last_poll = db.scalar(select(func.max(OfferSnapshot.observed_at)))
+    return MarketMeta(
+        fee_pct=settings.MARKET_FEE_PCT,
+        poll_interval_seconds=POLL_INTERVAL_SECONDS,
+        last_poll_at=last_poll,
+    )
+
+
+@router.get("/listings", response_model=list[MarketListingRow])
+def listings(
+    gpu_name: str = Query(...),
+    num_gpus: int | None = Query(None),
+    rented: bool | None = Query(None),
+    limit: int = Query(300, ge=1, le=2000),
+    db: Session = Depends(get_db),
+) -> list[MarketListingRow]:
+    """Every live server for a GPU from the most recent poll — rented AND
+    available — with full per-offer detail (dlperf, perf/$, reliability,
+    verification, host/machine id, source, renter & host price). This is the
+    surface for seeing unrented rigs and reasoning about *why* they didn't rent
+    (price vs reliability vs verification). All snapshots in a poll share one
+    observed_at, so the latest poll = the latest market state per offer."""
+    latest_poll = db.scalar(
+        select(func.max(OfferSnapshot.observed_at)).where(
+            OfferSnapshot.gpu_name == gpu_name
+        )
+    )
+    if latest_poll is None:
+        return []
+    stmt = select(OfferSnapshot).where(
+        OfferSnapshot.gpu_name == gpu_name,
+        OfferSnapshot.observed_at == latest_poll,
+    )
+    if num_gpus is not None:
+        stmt = stmt.where(OfferSnapshot.num_gpus == num_gpus)
+    if rented is not None:
+        stmt = stmt.where(OfferSnapshot.rented.is_(rented))
+    # ASC puts NULL prices last under Postgres — cheap offers surface first.
+    stmt = stmt.order_by(OfferSnapshot.price_gpu.asc()).limit(limit)
+
+    fee = settings.MARKET_FEE_PCT
+    out: list[MarketListingRow] = []
+    seen: set[int] = set()
+    for s in db.scalars(stmt):
+        if s.offer_id in seen:  # guard against an offer sampled in both queries
+            continue
+        seen.add(s.offer_id)
+        renter = _f(s.price_gpu)
+        out.append(
+            MarketListingRow(
+                offer_id=s.offer_id,
+                machine_id=s.machine_id,
+                host_id=s.host_id,
+                market_source=s.market_source,
+                gpu_name=s.gpu_name,
+                num_gpus=s.num_gpus,
+                gpu_ram_mb=s.gpu_ram_mb,
+                gpu_max_power_w=s.gpu_max_power_w,
+                price_gpu=renter,
+                price_gpu_host=round(renter * (1 - fee), 6) if renter is not None else None,
+                dph_total=_f(s.dph_total),
+                dlperf=_f(s.dlperf),
+                dlperf_per_dphtotal=_f(s.dlperf_per_dphtotal),
+                reliability=_f(s.reliability),
+                verified=s.verified,
+                geolocation=s.geolocation,
+                rented=s.rented,
+                end_date=s.end_date,
+                observed_at=s.observed_at,
+            )
+        )
+    return out
+
+
 @router.get("/overview", response_model=list[MarketOverviewRow])
 def overview(db: Session = Depends(get_db)) -> list[MarketOverviewRow]:
     """Cross-GPU market leaderboard at the per-GPU (num_gpus=1) reference market:
@@ -164,10 +246,27 @@ def overview(db: Session = Depends(get_db)) -> list[MarketOverviewRow]:
         ).all()
     )
 
+    # Liquidity-weighted demand (item: "actual top demand"). Raw utilization lets
+    # a thin 7/7 (100%) outrank a genuinely hot 180/200. We instead rank by a
+    # demand_score that (a) shrinks utilization toward the market average when
+    # supply is thin (Bayesian smoothing with K pseudo-offers), and (b) blends in
+    # 24h rental velocity. So a 7/7 needs sustained volume to read as "hot".
+    market_total = sum((d.supply_count or 0) for d in latest.values())
+    market_rented = sum((d.rented_count or 0) for d in latest.values())
+    global_util = (market_rented / market_total) if market_total else 0.0
+    max_rentals = max((int(counts.get(n, 0)) for n in latest), default=0)
+    K = 15  # pseudo-offers pulling thin-supply classes toward the market average
+
+    def _demand_score(total: int, rented: int, rentals: int) -> float:
+        smoothed = (rented + K * global_util) / (total + K)  # 0..1
+        velocity = (rentals / max_rentals) if max_rentals else 0.0  # 0..1
+        return round(0.7 * smoothed + 0.3 * velocity, 4)
+
     out: list[MarketOverviewRow] = []
     for name, d in latest.items():
         total = d.supply_count or 0
         rented = d.rented_count or 0
+        rentals = int(counts.get(name, 0))
         out.append(
             MarketOverviewRow(
                 gpu_name=name,
@@ -181,14 +280,16 @@ def overview(db: Session = Depends(get_db)) -> list[MarketOverviewRow]:
                 available_count=max(0, total - rented),
                 rented_count=rented,
                 utilization_pct=_f(d.utilization_pct),
-                rentals_24h=int(counts.get(name, 0)),
+                demand_score=_demand_score(total, rented, rentals),
+                rentals_24h=rentals,
                 median_dwell_minutes=_f(dwell.get(name)),
                 dlperf=_f(d.dlperf),
                 dlperf_per_dphtotal=_f(d.dlperf_per_dphtotal),
+                price_basis=d.price_basis or "ask",
                 computed_at=d.computed_at,
             )
         )
-    out.sort(key=lambda r: (r.utilization_pct or 0), reverse=True)
+    out.sort(key=lambda r: (r.demand_score or 0), reverse=True)
     return out
 
 

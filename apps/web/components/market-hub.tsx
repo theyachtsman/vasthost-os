@@ -17,6 +17,8 @@ import {
 
 import { ClassSelector } from '@/components/class-selector';
 import { DistributionBar } from '@/components/distribution-bar';
+import { LiveIndicator } from '@/components/live-indicator';
+import { MarketListings } from '@/components/market-listings';
 import { MarketOverviewTable } from '@/components/market-overview-table';
 import { MarketSummary } from '@/components/market-summary';
 import { PageHeader } from '@/components/page-header';
@@ -25,14 +27,16 @@ import { SizeLadder } from '@/components/size-ladder';
 import { SortHeader, useSort } from '@/components/sort-header';
 import { UtilizationBar, demandLabel } from '@/components/utilization';
 import { Widget } from '@/components/widget';
-import { dph, num, pct, relativeTime } from '@/lib/format';
+import { dph, hostTake, num, pct, relativeTime } from '@/lib/format';
 import {
   useClearingEvents,
   useDistribution,
   useDistributionHistory,
   useMachines,
+  useMarketMeta,
 } from '@/lib/hooks';
 import { MARKET_SOURCE_COLORS } from '@/lib/market-source';
+import { useOwnedFleet } from '@/lib/owned';
 import { useClassStore } from '@/lib/store';
 
 const AXIS = { stroke: 'hsl(218 10% 58%)', fontSize: 11 };
@@ -53,25 +57,40 @@ export type MarketHubMode = 'guest' | 'app';
 export function MarketHub({ mode }: { mode: MarketHubMode }) {
   const cls = useClassStore((s) => s.selected);
   const isApp = mode === 'app';
+  const meta = useMarketMeta();
+  const owned = useOwnedFleet(isApp);
+  const feePct = meta.data?.fee_pct ?? null;
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Market Intelligence"
-        description="Live supply, demand, and pricing across the GPU market — what rents, for how much, and how fast. All prices are per-GPU/hour."
+        description={
+          'Live supply, demand, and pricing across the GPU market — what rents, for how much, and how fast. ' +
+          'Prices are per-GPU/hour and renter-pay (Vast fee included)' +
+          (feePct != null
+            ? `; "host receives" figures assume a ${Math.round(feePct * 100)}% fee.`
+            : '.')
+        }
+        actions={<LiveIndicator />}
       />
 
       <MarketSummary />
 
       {mode === 'guest' ? <GuestCta /> : null}
 
-      <MarketOverviewTable />
+      <MarketOverviewTable owned={owned.gpus} feePct={feePct} />
 
-      <PriceDemandScatter />
+      <PriceDemandScatter owned={owned.gpus} />
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
         <h2 className="text-sm font-semibold text-fg">
           Deep dive — <span className="text-accent">{cls.gpu_name}</span>
+          {isApp && owned.gpus.has(cls.gpu_name) ? (
+            <Badge variant="accent" className="ml-2">
+              you host this
+            </Badge>
+          ) : null}
         </h2>
         <ClassSelector />
       </div>
@@ -80,12 +99,14 @@ export function MarketHub({ mode }: { mode: MarketHubMode }) {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <PriceDistributionWidget cls={cls} mode={mode} />
+          <PriceDistributionWidget cls={cls} mode={mode} feePct={feePct} />
         </div>
         <SelectedStatsCard cls={cls} />
       </div>
 
       <SizeLadder />
+
+      <MarketListings cls={cls} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SupplyDemandWidget cls={cls} />
@@ -239,7 +260,15 @@ function Stat2({ label, value, hint }: { label: string; value: React.ReactNode; 
   );
 }
 
-function PriceDistributionWidget({ cls, mode }: { cls: Cls; mode: MarketHubMode }) {
+function PriceDistributionWidget({
+  cls,
+  mode,
+  feePct,
+}: {
+  cls: Cls;
+  mode: MarketHubMode;
+  feePct: number | null;
+}) {
   const dist = useDistribution(cls.gpu_name, cls.num_gpus);
   const yourPrice = useYourPrice(cls, mode);
   return (
@@ -247,7 +276,10 @@ function PriceDistributionWidget({ cls, mode }: { cls: Cls; mode: MarketHubMode 
       title="Price Distribution"
       action={
         dist.data ? (
-          <span className="text-[10px] text-muted">
+          <span className="flex items-center gap-2 text-[10px] text-muted">
+            {dist.data.price_basis === 'last-rented' ? (
+              <Badge variant="muted">last rented</Badge>
+            ) : null}
             updated {relativeTime(dist.data.computed_at)}
           </span>
         ) : null
@@ -285,6 +317,14 @@ function PriceDistributionWidget({ cls, mode }: { cls: Cls; mode: MarketHubMode 
               <span>Supply: {num(d.supply_count)}</span>
               <span>Rented: {num(d.rented_count)}</span>
               <span>Utilization: {pct(d.utilization_pct)}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-md border border-border bg-bg/40 px-3 py-2 text-xs">
+              <span className="text-muted">Median — renter pays vs host receives</span>
+              <span className="tabular-nums">
+                <span className="text-fg">{dph(d.p50_price)}</span>
+                <span className="mx-1 text-muted">→</span>
+                <span className="text-emerald-400/90">{dph(hostTake(d.p50_price, feePct))}</span>
+              </span>
             </div>
           </div>
         )}
@@ -325,63 +365,88 @@ function SupplyDemandWidget({ cls }: { cls: Cls }) {
             util: r.utilization_pct ?? 0,
             price: r.p50_price ?? null,
           }));
+          const tooltipStyle = {
+            background: 'hsl(222 16% 10%)',
+            border: '1px solid hsl(222 12% 20%)',
+            borderRadius: 8,
+            fontSize: 12,
+          };
           return (
-            <div className="h-56 pt-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="supply" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="hsl(243 75% 65%)" stopOpacity={0.4} />
-                      <stop offset="100%" stopColor="hsl(243 75% 65%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
-                  <XAxis dataKey="t" {...AXIS} tickLine={false} minTickGap={32} />
-                  <YAxis yAxisId="left" {...AXIS} tickLine={false} axisLine={false} width={36} />
-                  <YAxis
-                    yAxisId="right"
-                    orientation="right"
-                    {...AXIS}
-                    tickLine={false}
-                    axisLine={false}
-                    width={44}
-                    tickFormatter={(v) => `$${v}`}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: 'hsl(222 16% 10%)',
-                      border: '1px solid hsl(222 12% 20%)',
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                  />
-                  <Area
-                    yAxisId="left"
-                    type="monotone"
-                    dataKey="supply"
-                    stroke="hsl(243 75% 65%)"
-                    fill="url(#supply)"
-                    strokeWidth={2}
-                  />
-                  <Line
-                    yAxisId="left"
-                    type="monotone"
-                    dataKey="util"
-                    stroke="hsl(160 70% 45%)"
-                    dot={false}
-                    strokeWidth={1.5}
-                  />
-                  <Line
-                    yAxisId="right"
-                    type="monotone"
-                    dataKey="price"
-                    stroke="hsl(43 90% 55%)"
-                    dot={false}
-                    strokeWidth={1.5}
-                    connectNulls
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+            <div className="flex flex-col gap-1 pt-2">
+              {/* Supply (left, counts) + Utilization (right, 0–100%). Util used to
+                  share the supply axis and rendered flat against the bottom — it
+                  now has its own % scale so demand is actually visible. */}
+              <div className="h-40">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="supply" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(243 75% 65%)" stopOpacity={0.4} />
+                        <stop offset="100%" stopColor="hsl(243 75% 65%)" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+                    <XAxis dataKey="t" {...AXIS} tickLine={false} minTickGap={32} />
+                    <YAxis yAxisId="left" {...AXIS} tickLine={false} axisLine={false} width={36} />
+                    <YAxis
+                      yAxisId="util"
+                      orientation="right"
+                      domain={[0, 100]}
+                      {...AXIS}
+                      tickLine={false}
+                      axisLine={false}
+                      width={40}
+                      tickFormatter={(v) => `${v}%`}
+                    />
+                    <Tooltip contentStyle={tooltipStyle} />
+                    <Area
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="supply"
+                      name="Supply"
+                      stroke="hsl(243 75% 65%)"
+                      fill="url(#supply)"
+                      strokeWidth={2}
+                    />
+                    <Line
+                      yAxisId="util"
+                      type="monotone"
+                      dataKey="util"
+                      name="Util %"
+                      stroke="hsl(160 70% 45%)"
+                      dot={false}
+                      strokeWidth={1.5}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              {/* Median price over time, on its own $ scale so trends are legible. */}
+              <div className="h-20">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={data} margin={{ top: 2, right: 44, left: -16, bottom: 0 }}>
+                    <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+                    <XAxis dataKey="t" {...AXIS} tickLine={false} minTickGap={32} hide />
+                    <YAxis
+                      {...AXIS}
+                      tickLine={false}
+                      axisLine={false}
+                      width={36}
+                      domain={['auto', 'auto']}
+                      tickFormatter={(v) => `$${v}`}
+                    />
+                    <Tooltip contentStyle={tooltipStyle} />
+                    <Line
+                      type="monotone"
+                      dataKey="price"
+                      name="Median $"
+                      stroke="hsl(43 90% 55%)"
+                      dot={false}
+                      strokeWidth={1.5}
+                      connectNulls
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           );
         }}
@@ -515,7 +580,15 @@ function ClearingEventsTable({ cls, mode }: { cls: Cls; mode: MarketHubMode }) {
                         {e.dwell_minutes != null ? `${e.dwell_minutes}m` : '—'}
                       </td>
                       <td className="px-4 py-2">
-                        <Badge variant={confidenceVariant(e.confidence)}>{e.confidence}</Badge>
+                        <span
+                          title={
+                            e.confidence_reason ??
+                            'Signal strength of this confirmed rental (how established the listing was).'
+                          }
+                          className="cursor-help"
+                        >
+                          <Badge variant={confidenceVariant(e.confidence)}>{e.confidence}</Badge>
+                        </span>
                       </td>
                       <td className="px-4 py-2 text-right text-muted">
                         {relativeTime(e.detected_at)}
@@ -525,8 +598,18 @@ function ClearingEventsTable({ cls, mode }: { cls: Cls; mode: MarketHubMode }) {
                 })}
               </tbody>
             </table>
-            <div className="px-4 pt-2 text-[11px] text-muted">
-              {rows.length} event{rows.length === 1 ? '' : 's'} shown
+            <div className="flex flex-col gap-1 px-4 pt-2 text-[11px] text-muted">
+              <span>
+                {rows.length} event{rows.length === 1 ? '' : 's'} shown
+              </span>
+              <span>
+                Every row is a <span className="text-fg">confirmed</span> rental (an offer we saw
+                available is now rented — sampling can miss events but never invent them).{' '}
+                <span className="text-emerald-400">HIGH</span> = established listing (seen ≥3 polls) +
+                verified host · <span className="text-amber-400">MEDIUM</span> = established or
+                verified · <span className="text-muted">LOW</span> = thin evidence (first/second
+                sighting, unverified). Hover a badge for the specifics.
+              </span>
             </div>
           </div>
         )}

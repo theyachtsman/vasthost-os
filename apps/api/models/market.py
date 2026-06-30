@@ -24,6 +24,7 @@ class OfferSnapshot(Base):
     )  # 'vast' | 'runpod' (reserved)
     offer_id: Mapped[int] = mapped_column(Integer, nullable=False)
     machine_id: Mapped[int | None] = mapped_column(Integer)
+    host_id: Mapped[int | None] = mapped_column(Integer)  # Vast host that owns the listing
     gpu_name: Mapped[str] = mapped_column(String, nullable=False)
     num_gpus: Mapped[int | None] = mapped_column(Integer)
     gpu_ram_mb: Mapped[int | None] = mapped_column(Integer)
@@ -63,6 +64,8 @@ class ClearingEvent(Base):
     dwell_minutes: Mapped[int | None] = mapped_column(Integer)
     is_partial_fill: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     confidence: Mapped[str] = mapped_column(String, default="MEDIUM", server_default="MEDIUM")
+    # Human-readable explanation of how the confidence grade was reached.
+    confidence_reason: Mapped[str | None] = mapped_column(String)
 
 
 class MarketDistribution(Base):
@@ -92,3 +95,6 @@ class MarketDistribution(Base):
     # Median deep-learning performance + perf-per-dollar (Vast's value signal).
     dlperf: Mapped[float | None] = mapped_column(Numeric(10, 4))
     dlperf_per_dphtotal: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    # How the percentile prices were derived: 'ask' (available offers) or
+    # 'last-rented' (fallback from rented offers when the size is fully rented).
+    price_basis: Mapped[str] = mapped_column(String, default="ask", server_default="ask")

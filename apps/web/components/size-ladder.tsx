@@ -4,8 +4,8 @@ import { DataState } from '@vasthost/ui';
 
 import { UtilizationBar } from '@/components/utilization';
 import { Widget } from '@/components/widget';
-import { dph, num } from '@/lib/format';
-import { useMarketSizes } from '@/lib/hooks';
+import { dph, hostTake, num } from '@/lib/format';
+import { useMarketMeta, useMarketSizes } from '@/lib/hooks';
 import { useClassStore } from '@/lib/store';
 
 // Per-GPU price + utilization across config sizes (×1, ×2, ×4, ×8 …) for the
@@ -15,6 +15,7 @@ export function SizeLadder() {
   const { gpu_name, num_gpus } = useClassStore((s) => s.selected);
   const setSelected = useClassStore((s) => s.setSelected);
   const sizes = useMarketSizes(gpu_name);
+  const feePct = useMarketMeta().data?.fee_pct ?? null;
 
   return (
     <Widget title={`Config sizes — ${gpu_name} (per-GPU)`}>
@@ -60,6 +61,12 @@ export function SizeLadder() {
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums font-medium text-fg">
                         {dph(r.p50_price)}
+                        <div className="text-[10px] font-normal text-emerald-400/80">
+                          {dph(hostTake(r.p50_price, feePct))} net
+                          {r.price_basis === 'last-rented' ? (
+                            <span className="ml-1 text-muted">· last rented</span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums text-muted">
                         {dph(r.p75_price)}
