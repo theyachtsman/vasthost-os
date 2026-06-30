@@ -213,9 +213,9 @@ export function MarketListings({ cls }: { cls: Cls }) {
                 {data.length} shown · {availCount} available · {rentedCount} rented
               </span>
               <span>
-                Renter $/hr is what a renter pays (incl. Vast fee). Host $/hr is what you'd keep
+                Renter $/hr is what a renter pays (incl. Vast fee). Host $/hr is what you keep
                 {feePct != null ? ` (−${num(Math.round(feePct * 100))}% fee)` : ''}. Sort available
-                rows by price or reliability to see why a rig isn't renting.
+                rows by price or reliability to see why a rig is not renting.
               </span>
             </div>
           </div>

@@ -134,7 +134,7 @@ export function PriceDemandScatter({ owned }: { owned?: Set<string> }) {
               <p className="text-[11px] text-muted">
                 Each dot is a GPU (bubble size = supply, color = liquidity-weighted demand). Higher =
                 more utilized, right = pricier. Green = genuinely hot; a small dim dot high up is a
-                thinly-supplied 100% that isn't real demand.
+                thinly-supplied 100% that is not real demand.
                 {owned && owned.size > 0 ? ' Outlined dots are GPUs you host.' : ''} Click a dot to
                 drill in.
               </p>

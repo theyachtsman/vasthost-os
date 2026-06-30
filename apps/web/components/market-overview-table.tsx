@@ -158,7 +158,7 @@ export function MarketOverviewTable({
             <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-2 text-[11px] text-muted">
               <span>
                 {data.length} GPU classes · ranked by liquidity-weighted demand (a thin 100%-rented
-                class won't top the board) · click a row to drill in
+                class will not top the board) · click a row to drill in
               </span>
               <span className="flex items-center gap-2">
                 {owned && owned.size > 0 ? <Badge variant="accent">your fleet</Badge> : null}
