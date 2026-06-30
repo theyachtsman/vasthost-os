@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { SortHeader, useSort } from '@/components/sort-header';
 import { UtilizationBar, demandLabel } from '@/components/utilization';
 import { Widget } from '@/components/widget';
-import { dph, hostTake, num, pct } from '@/lib/format';
+import { dph, num, pct } from '@/lib/format';
 import { useMarketOverview } from '@/lib/hooks';
 import { useClassStore } from '@/lib/store';
 
@@ -17,13 +17,7 @@ type Key = 'gpu' | 'price' | 'spread' | 'demand' | 'util' | 'value' | 'supply' |
 // utilization bar/label already understand (Hot/Warm/Soft/Cold).
 const demandPct = (r: MarketOverviewRow) => (r.demand_score ?? 0) * 100;
 
-export function MarketOverviewTable({
-  owned,
-  feePct,
-}: {
-  owned?: Set<string>;
-  feePct?: number | null;
-}) {
+export function MarketOverviewTable({ owned }: { owned?: Set<string> }) {
   const overview = useMarketOverview();
   const setSelected = useClassStore((s) => s.setSelected);
   const selected = useClassStore((s) => s.selected);
@@ -113,9 +107,6 @@ export function MarketOverviewTable({
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums text-fg">
                         {dph(r.p50_price)}
-                        <div className="text-[10px] text-emerald-400/80">
-                          {dph(hostTake(r.p50_price, feePct ?? null))} net
-                        </div>
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums text-muted">
                         {dph(r.p10_price)}–{dph(r.p90_price)}

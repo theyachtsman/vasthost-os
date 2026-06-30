@@ -13,7 +13,7 @@ export function Widget({
 }) {
   return (
     <Card className={className}>
-      <CardHeader className="flex-row items-center justify-between">
+      <CardHeader className="flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
         <CardTitle>{title}</CardTitle>
         {action}
       </CardHeader>

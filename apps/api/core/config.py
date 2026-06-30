@@ -16,9 +16,12 @@ class Settings(BaseSettings):
     VAST_OBSERVER_DEFAULT_GPU: str = "RTX_4090"
     VAST_OBSERVER_DEFAULT_NUM_GPUS: int = 1
 
-    # Market fee model — the marketplace prices we observe are renter-pay (Vast's
-    # fee already included). host-receives = renter * (1 - MARKET_FEE_PCT). Single
-    # source of truth; the simulator's per-host service fee defaults to this too.
+    # Estimated platform (Vast) commission. Single source of truth for fee math.
+    # NOT applied to Market Intelligence surfaces — those show the asking price
+    # hosts set, with no fee derivation (the post-vs-pre-fee meaning of dph_base
+    # was never verified). Used only by the simulator's break-even ESTIMATE, where
+    # an assumed rate is acceptable as long as it's labeled. The per-host
+    # vast_service_fee_pct override defaults to this.
     MARKET_FEE_PCT: float = 0.25
 
     # Infra

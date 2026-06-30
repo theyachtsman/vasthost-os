@@ -239,9 +239,7 @@ export interface MarketListingRow {
   num_gpus: number | null;
   gpu_ram_mb: number | null;
   gpu_max_power_w: number | null;
-  price_gpu: number | null; // renter-pay per GPU/hr
-  price_gpu_host: number | null; // host-receives = renter * (1 - fee)
-  dph_total: number | null;
+  price_gpu: number | null; // asking price (host's set dph_base) per GPU/hr
   dlperf: number | null;
   dlperf_per_dphtotal: number | null;
   reliability: number | null;

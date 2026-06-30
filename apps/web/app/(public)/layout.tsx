@@ -14,18 +14,20 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface/40 px-5">
-        <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-accent-fg">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-surface/40 px-3 sm:px-5">
+        <Link href="/" className="flex min-w-0 items-center gap-2">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent text-accent-fg">
             <LineChart className="h-4 w-4" />
           </div>
-          <div className="leading-tight">
-            <div className="text-sm font-semibold text-fg">GPUIQ</div>
-            <div className="text-[10px] uppercase tracking-wide text-muted">GPU Market Intel</div>
+          <div className="min-w-0 leading-tight">
+            <div className="truncate text-sm font-semibold text-fg">GPUIQ</div>
+            <div className="hidden truncate text-[10px] uppercase tracking-wide text-muted sm:block">
+              GPU Market Intel
+            </div>
           </div>
         </Link>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {me ? (
             <Link href="/dashboard">
               <Button>Open dashboard</Button>
@@ -43,7 +45,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto p-6">{children}</main>
+      <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
     </div>
   );
 }

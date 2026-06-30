@@ -164,14 +164,16 @@ def listings(
     # ASC puts NULL prices last under Postgres — cheap offers surface first.
     stmt = stmt.order_by(OfferSnapshot.price_gpu.asc()).limit(limit)
 
-    fee = settings.MARKET_FEE_PCT
+    # Asking price only — the host's set dph_base per GPU. No fee/host-take math is
+    # surfaced on market pages (that lives in the simulator's break-even estimate);
+    # dph_total is still captured by the Observer but intentionally not serialised
+    # here so nothing implies a renter-facing price.
     out: list[MarketListingRow] = []
     seen: set[int] = set()
     for s in db.scalars(stmt):
         if s.offer_id in seen:  # guard against an offer sampled in both queries
             continue
         seen.add(s.offer_id)
-        renter = _f(s.price_gpu)
         out.append(
             MarketListingRow(
                 offer_id=s.offer_id,
@@ -182,9 +184,7 @@ def listings(
                 num_gpus=s.num_gpus,
                 gpu_ram_mb=s.gpu_ram_mb,
                 gpu_max_power_w=s.gpu_max_power_w,
-                price_gpu=renter,
-                price_gpu_host=round(renter * (1 - fee), 6) if renter is not None else None,
-                dph_total=_f(s.dph_total),
+                price_gpu=_f(s.price_gpu),
                 dlperf=_f(s.dlperf),
                 dlperf_per_dphtotal=_f(s.dlperf_per_dphtotal),
                 reliability=_f(s.reliability),

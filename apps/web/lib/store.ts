@@ -18,3 +18,15 @@ export const useClassStore = create<ClassState>((set) => ({
   selected: null,
   setSelected: (selected) => set({ selected }),
 }));
+
+interface UiState {
+  mobileNavOpen: boolean;
+  setMobileNavOpen: (open: boolean) => void;
+}
+
+// Drives the off-canvas sidebar on tablet/phone widths (Sidebar + Topbar are
+// siblings under the app shell, so this is simpler than prop-drilling).
+export const useUiStore = create<UiState>((set) => ({
+  mobileNavOpen: false,
+  setMobileNavOpen: (mobileNavOpen) => set({ mobileNavOpen }),
+}));

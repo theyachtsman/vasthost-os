@@ -11,8 +11,9 @@ export function dph(value: number | null | undefined): string {
   return `$${value.toFixed(4)}/hr`;
 }
 
-// Renter-pay → host-receives. Market prices are post-Vast-fee (what the renter
-// pays); the host pockets renter * (1 - fee). feePct is a fraction (0.25 = 25%).
+// Host-take helper: amount * (1 - feePct). NOT used on Market Intelligence
+// surfaces (those show asking price only) — retained for the future Pricing
+// Control Center, where fee-adjusted recommendations belong. feePct is a fraction.
 export function hostTake(
   renter: number | null | undefined,
   feePct: number | null | undefined,

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from db.session import get_db
 from models import MarketDistribution, SimulatedHost, User
 from schemas.models import (
@@ -25,7 +26,9 @@ def _to_out(host: SimulatedHost) -> SimulatedHostOut:
     out.break_even_floor = break_even_floor_per_gpu_hour(
         host.gpu_max_power_w,
         float(host.kwh_rate) if host.kwh_rate is not None else None,
-        float(host.vast_service_fee_pct) if host.vast_service_fee_pct is not None else 0.20,
+        float(host.vast_service_fee_pct)
+        if host.vast_service_fee_pct is not None
+        else settings.MARKET_FEE_PCT,
     )
     return out
 
@@ -100,7 +103,11 @@ def market_context(
     if host is None:
         raise HTTPException(status_code=404, detail="Simulated host not found")
 
-    fee = float(host.vast_service_fee_pct) if host.vast_service_fee_pct is not None else 0.20
+    fee = (
+        float(host.vast_service_fee_pct)
+        if host.vast_service_fee_pct is not None
+        else settings.MARKET_FEE_PCT
+    )
     power = host.gpu_max_power_w
     kwh = float(host.kwh_rate) if host.kwh_rate is not None else None
     n = host.num_gpus or 1

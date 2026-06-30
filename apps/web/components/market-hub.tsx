@@ -27,13 +27,12 @@ import { SizeLadder } from '@/components/size-ladder';
 import { SortHeader, useSort } from '@/components/sort-header';
 import { UtilizationBar, demandLabel } from '@/components/utilization';
 import { Widget } from '@/components/widget';
-import { dph, hostTake, num, pct, relativeTime } from '@/lib/format';
+import { dph, num, pct, relativeTime } from '@/lib/format';
 import {
   useClearingEvents,
   useDistribution,
   useDistributionHistory,
   useMachines,
-  useMarketMeta,
 } from '@/lib/hooks';
 import { MARKET_SOURCE_COLORS } from '@/lib/market-source';
 import { useAutoSelectOwnedClass, useOwnedFleet } from '@/lib/owned';
@@ -60,21 +59,13 @@ export function MarketHub({ mode }: { mode: MarketHubMode }) {
   // nothing selected and picks from the board.
   useAutoSelectOwnedClass(isApp);
   const cls = useClassStore((s) => s.selected);
-  const meta = useMarketMeta();
   const owned = useOwnedFleet(isApp);
-  const feePct = meta.data?.fee_pct ?? null;
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Market Intelligence"
-        description={
-          'Live supply, demand, and pricing across the GPU market — what rents, for how much, and how fast. ' +
-          'Prices are per-GPU/hour and renter-pay (Vast fee included)' +
-          (feePct != null
-            ? `; "host receives" figures assume a ${Math.round(feePct * 100)}% fee.`
-            : '.')
-        }
+        description="Live supply, demand, and pricing across the GPU market — what rents, for how much, and how fast. Prices are the per-GPU/hour asking price hosts set."
         actions={<LiveIndicator />}
       />
 
@@ -82,7 +73,7 @@ export function MarketHub({ mode }: { mode: MarketHubMode }) {
 
       {mode === 'guest' ? <GuestCta /> : null}
 
-      <MarketOverviewTable owned={owned.gpus} feePct={feePct} />
+      <MarketOverviewTable owned={owned.gpus} />
 
       <PriceDemandScatter owned={owned.gpus} />
 
@@ -104,14 +95,14 @@ export function MarketHub({ mode }: { mode: MarketHubMode }) {
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="lg:col-span-2">
-              <PriceDistributionWidget cls={cls} mode={mode} feePct={feePct} />
+              <PriceDistributionWidget cls={cls} mode={mode} />
             </div>
             <SelectedStatsCard cls={cls} />
           </div>
 
           <SizeLadder cls={cls} />
 
-          <MarketListings cls={cls} feePct={feePct} />
+          <MarketListings cls={cls} />
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <SupplyDemandWidget cls={cls} />
@@ -286,15 +277,7 @@ function Stat2({ label, value, hint }: { label: string; value: React.ReactNode; 
   );
 }
 
-function PriceDistributionWidget({
-  cls,
-  mode,
-  feePct,
-}: {
-  cls: Cls;
-  mode: MarketHubMode;
-  feePct: number | null;
-}) {
+function PriceDistributionWidget({ cls, mode }: { cls: Cls; mode: MarketHubMode }) {
   const dist = useDistribution(cls.gpu_name, cls.num_gpus);
   const yourPrice = useYourPrice(cls, mode);
   return (
@@ -343,14 +326,6 @@ function PriceDistributionWidget({
               <span>Supply: {num(d.supply_count)}</span>
               <span>Rented: {num(d.rented_count)}</span>
               <span>Utilization: {pct(d.utilization_pct)}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-md border border-border bg-bg/40 px-3 py-2 text-xs">
-              <span className="text-muted">Median — renter pays vs host receives</span>
-              <span className="tabular-nums">
-                <span className="text-fg">{dph(d.p50_price)}</span>
-                <span className="mx-1 text-muted">→</span>
-                <span className="text-emerald-400/90">{dph(hostTake(d.p50_price, feePct))}</span>
-              </span>
             </div>
           </div>
         )}

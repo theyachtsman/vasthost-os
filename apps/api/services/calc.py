@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from core.config import settings
+
 HOURS_PER_MONTH = 730.0
 
 
 def break_even_floor_per_gpu_hour(
     gpu_max_power_w: float | None,
     kwh_rate: float | None,
-    service_fee_pct: float = 0.20,
+    service_fee_pct: float = settings.MARKET_FEE_PCT,
 ) -> float | None:
     """Minimum on-demand $/GPU-hr where revenue (after Vast's cut) covers power.
 

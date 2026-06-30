@@ -16,6 +16,8 @@ import {
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { useUiStore } from '@/lib/store';
+
 type NavItem = {
   href: string;
   label: string;
@@ -41,8 +43,13 @@ const TOOLS: NavItem[] = [
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   const Icon = item.icon;
+  const setMobileNavOpen = useUiStore((s) => s.setMobileNavOpen);
   return (
-    <Link href={item.href} aria-current={active ? 'page' : undefined}>
+    <Link
+      href={item.href}
+      aria-current={active ? 'page' : undefined}
+      onClick={() => setMobileNavOpen(false)}
+    >
       <span
         className={cn(
           'group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
@@ -66,36 +73,54 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 export function Sidebar() {
   const pathname = usePathname();
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
+  const mobileNavOpen = useUiStore((s) => s.mobileNavOpen);
+  const setMobileNavOpen = useUiStore((s) => s.setMobileNavOpen);
 
   return (
-    <aside className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-surface/40">
-      <div className="flex h-14 items-center gap-2 border-b border-border px-4">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-accent-fg">
-          <LineChart className="h-4 w-4" />
-        </div>
-        <div className="leading-tight">
-          <div className="text-sm font-semibold text-fg">GPUIQ</div>
-          <div className="text-[10px] uppercase tracking-wide text-muted">GPU Market Intel</div>
-        </div>
-      </div>
+    <>
+      {mobileNavOpen ? (
+        <div
+          className="fixed inset-0 z-40 bg-bg/70 lg:hidden"
+          aria-hidden="true"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      ) : null}
 
-      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
-        <div className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted/70">
-          Surfaces
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 flex h-full w-64 shrink-0 -translate-x-full flex-col border-r border-border bg-surface transition-transform duration-200 ease-in-out',
+          'lg:static lg:z-auto lg:w-60 lg:translate-x-0 lg:bg-surface/40',
+          mobileNavOpen && 'translate-x-0',
+        )}
+      >
+        <div className="flex h-14 items-center gap-2 border-b border-border px-4">
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-accent-fg">
+            <LineChart className="h-4 w-4" />
+          </div>
+          <div className="leading-tight">
+            <div className="text-sm font-semibold text-fg">GPUIQ</div>
+            <div className="text-[10px] uppercase tracking-wide text-muted">GPU Market Intel</div>
+          </div>
         </div>
-        {SURFACES.map((item) => (
-          <NavLink key={item.href} item={item} active={isActive(item.href)} />
-        ))}
 
-        <div className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted/70">
-          Tools
-        </div>
-        {TOOLS.map((item) => (
-          <NavLink key={item.href} item={item} active={isActive(item.href)} />
-        ))}
-      </nav>
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
+          <div className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted/70">
+            Surfaces
+          </div>
+          {SURFACES.map((item) => (
+            <NavLink key={item.href} item={item} active={isActive(item.href)} />
+          ))}
 
-      <div className="border-t border-border p-3 text-[10px] text-muted/70">Observer live</div>
-    </aside>
+          <div className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted/70">
+            Tools
+          </div>
+          {TOOLS.map((item) => (
+            <NavLink key={item.href} item={item} active={isActive(item.href)} />
+          ))}
+        </nav>
+
+        <div className="border-t border-border p-3 text-[10px] text-muted/70">Observer live</div>
+      </aside>
+    </>
   );
 }

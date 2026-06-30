@@ -183,7 +183,12 @@ class MarketMeta(BaseModel):
 
 
 class MarketListingRow(BaseModel):
-    """One live server/offer — the per-server detail behind the aggregates."""
+    """One live server/offer — the per-server detail behind the aggregates.
+
+    Market surfaces show the ASKING price only (``price_gpu`` = the host's set
+    dph_base, per GPU). No renter-pay/host-take derivation is surfaced here — fee
+    math lives solely in the simulator's break-even estimate.
+    """
 
     offer_id: int
     machine_id: int | None
@@ -193,11 +198,9 @@ class MarketListingRow(BaseModel):
     num_gpus: int | None
     gpu_ram_mb: int | None
     gpu_max_power_w: int | None
-    price_gpu: float | None  # renter-pay, per GPU/hr
-    price_gpu_host: float | None  # host-receives = renter * (1 - fee)
-    dph_total: float | None  # renter-pay total (all GPUs + base)
+    price_gpu: float | None  # asking price (host's set dph_base), per GPU/hr
     dlperf: float | None
-    dlperf_per_dphtotal: float | None
+    dlperf_per_dphtotal: float | None  # Vast's perf-per-$ value signal (a ratio, not a price)
     reliability: float | None
     verified: str | None
     geolocation: str | None
@@ -238,8 +241,8 @@ class SimulatedHostIn(BaseModel):
     reliability: float = 0.90
     geolocation: str | None = None
     kwh_rate: float | None = None
-    # Defaults to the platform-wide market fee assumption so the simulator and the
-    # Market hub's host-receives figures agree (configurable via MARKET_FEE_PCT).
+    # Per-rig override for the break-even ESTIMATE; defaults to the platform fee
+    # constant (MARKET_FEE_PCT) so all break-even math shares one source of truth.
     vast_service_fee_pct: float = Field(default_factory=lambda: settings.MARKET_FEE_PCT)
     is_active: bool = True
 

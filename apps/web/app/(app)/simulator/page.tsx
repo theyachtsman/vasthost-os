@@ -3,7 +3,7 @@
 import type { SimulatedHost } from '@vasthost/shared-types';
 import { Badge, Button, Card, CardContent, DataState, Input, Label } from '@vasthost/ui';
 import { Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { PageHeader } from '@/components/page-header';
@@ -12,6 +12,7 @@ import { breakEvenFloor } from '@/lib/calc';
 import { dph, num, pct, relativeTime, usd } from '@/lib/format';
 import {
   useDeleteSimulatedHost,
+  useMarketMeta,
   useSaveSimulatedHost,
   useSimulatedHostMarket,
   useSimulatedHosts,
@@ -40,7 +41,9 @@ const EMPTY: Draft = {
   reliability: 0.95,
   geolocation: '',
   kwh_rate: 0.12,
-  vast_service_fee_pct: 0.2,
+  // Pre-meta placeholder; replaced by the platform default (MARKET_FEE_PCT) once
+  // /market/meta loads, unless the user overrides it.
+  vast_service_fee_pct: 0.25,
 };
 
 export default function SimulatorPage() {
@@ -49,11 +52,23 @@ export default function SimulatorPage() {
   const del = useDeleteSimulatedHost();
   const [draft, setDraft] = useState<Draft>(EMPTY);
 
+  // Seed the per-rig fee from the platform default (MARKET_FEE_PCT, exposed via
+  // /market/meta) so there's a single source of truth — until the user overrides
+  // it. Per-rig override stays a feature.
+  const platformFee = useMarketMeta().data?.fee_pct ?? null;
+  const feeTouched = useRef(false);
+  useEffect(() => {
+    if (platformFee != null && !feeTouched.current) {
+      setDraft((d) => ({ ...d, vast_service_fee_pct: platformFee }));
+    }
+  }, [platformFee]);
+
   const floor = breakEvenFloor(draft.gpu_max_power_w, draft.kwh_rate, draft.vast_service_fee_pct);
 
   const set =
     <K extends keyof Draft>(key: K) =>
     (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (key === 'vast_service_fee_pct') feeTouched.current = true;
       const raw = e.target.value;
       const numeric = typeof EMPTY[key] === 'number';
       setDraft((d) => ({ ...d, [key]: numeric ? Number(raw) : raw }) as Draft);
@@ -100,7 +115,7 @@ export default function SimulatorPage() {
             <Field label="$/kWh">
               <Input type="number" step="0.01" value={draft.kwh_rate} onChange={set('kwh_rate')} />
             </Field>
-            <Field label="Service fee (0–1)">
+            <Field label="Est. platform fee (0–1)">
               <Input
                 type="number"
                 step="0.01"
@@ -112,9 +127,12 @@ export default function SimulatorPage() {
 
           <div className="mt-4 flex items-center justify-between rounded-md border border-border bg-bg/40 p-3">
             <div>
-              <div className="text-[10px] uppercase text-muted">Break-even floor</div>
+              <div className="text-[10px] uppercase text-muted">Est. break-even floor</div>
               <div className="text-lg font-semibold tabular-nums text-fg">{dph(floor)}</div>
-              <div className="text-[11px] text-muted">min $/GPU-hr to cover power after fees</div>
+              <div className="text-[11px] text-muted">
+                min $/GPU-hr to cover power, assuming a ~{pct(draft.vast_service_fee_pct * 100, 0)}{' '}
+                platform fee (estimate)
+              </div>
             </div>
             <Button onClick={submit} disabled={save.isPending}>
               Save config
@@ -148,7 +166,12 @@ export default function SimulatorPage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <div className="text-[10px] uppercase text-muted">Break-even</div>
+                          <div
+                            className="text-[10px] uppercase text-muted"
+                            title={`Estimate — assumes a ~${pct(h.vast_service_fee_pct * 100, 0)} platform fee`}
+                          >
+                            Est. break-even
+                          </div>
                           <div className="text-sm font-semibold tabular-nums text-fg">
                             {dph(h.break_even_floor)}
                           </div>
@@ -235,7 +258,12 @@ function SimMarketPanel({ host }: { host: SimulatedHost }) {
           </div>
         ))}
         <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 py-1.5">
-          <div className="text-[10px] uppercase text-muted">break-even</div>
+          <div
+            className="text-[10px] uppercase text-muted"
+            title={`Estimate — assumes a ~${pct(host.vast_service_fee_pct * 100, 0)} platform fee`}
+          >
+            est. break-even
+          </div>
           <div className="text-xs font-semibold tabular-nums text-emerald-400">
             {dph(d.break_even_floor)}
           </div>
@@ -256,7 +284,7 @@ function SimMarketPanel({ host }: { host: SimulatedHost }) {
           <table className="w-full text-xs">
             <thead>
               <tr className="text-[10px] uppercase text-muted">
-                <th className="px-1 py-1 text-left font-medium">Projected net @ p50</th>
+                <th className="px-1 py-1 text-left font-medium">Est. net @ p50</th>
                 <th className="px-1 py-1 text-right font-medium">100%</th>
                 <th className="px-1 py-1 text-right font-medium">70%</th>
                 <th className="px-1 py-1 text-right font-medium">50%</th>
