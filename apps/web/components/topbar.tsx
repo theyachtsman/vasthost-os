@@ -1,24 +1,35 @@
 'use client';
 
-import { cn } from '@vasthost/ui';
-import { usd } from '@/lib/format';
-import { useAccountStatus, useHealth } from '@/lib/hooks';
+import { Button, cn } from '@vasthost/ui';
+import { LogOut } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+
+import { useHealth, useLogout, useMe, useProviderKeys } from '@/lib/hooks';
 
 export function Topbar() {
-  const { data: account } = useAccountStatus();
+  const router = useRouter();
+  const { data: me } = useMe();
   const { data: health } = useHealth();
+  const { data: keys } = useProviderKeys();
+  const logout = useLogout();
 
-  const connected = account?.connected;
   const healthy = health?.status === 'healthy';
+  const vastKey = (keys ?? []).find((k) => k.provider === 'vast' && k.is_active);
+
+  const doLogout = () =>
+    logout.mutate(undefined, {
+      onSuccess: () => {
+        toast.success('Signed out');
+        router.push('/');
+      },
+    });
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface/40 px-5">
       <div className="flex items-center gap-2 text-sm text-muted">
         <span
-          className={cn(
-            'h-2 w-2 rounded-full',
-            healthy ? 'bg-emerald-400' : 'bg-red-400',
-          )}
+          className={cn('h-2 w-2 rounded-full', healthy ? 'bg-emerald-400' : 'bg-red-400')}
           title={`System ${health?.status ?? 'unknown'}`}
         />
         <span className="text-xs">
@@ -29,23 +40,20 @@ export function Topbar() {
       <div className="flex items-center gap-5">
         <div className="flex items-center gap-2">
           <span
-            className={cn(
-              'h-2 w-2 rounded-full',
-              connected ? 'bg-emerald-400' : 'bg-red-400',
-            )}
+            className={cn('h-2 w-2 rounded-full', vastKey ? 'bg-emerald-400' : 'bg-amber-400')}
+            title={vastKey ? 'Vast key connected' : 'No Vast key connected'}
           />
           <span className="text-xs text-muted">
-            {connected ? (account?.email ?? 'Connected') : 'Not connected'}
+            {vastKey ? 'Vast key connected' : 'Connect your key in Settings'}
           </span>
         </div>
-        {connected ? (
-          <div className="flex flex-col items-end leading-tight">
-            <span className="text-[10px] uppercase tracking-wide text-muted">Balance</span>
-            <span className="text-sm font-semibold tabular-nums text-fg">
-              {usd(account?.account_balance)}
-            </span>
-          </div>
-        ) : null}
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted">{me?.email ?? ''}</span>
+          <Button variant="ghost" size="sm" onClick={doLogout} disabled={logout.isPending}>
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </Button>
+        </div>
       </div>
     </header>
   );

@@ -1,5 +1,52 @@
-// TypeScript types mirroring the FastAPI Phase 0 response schemas
-// (apps/api/schemas/models.py). Keep these in sync with the backend.
+// TypeScript types mirroring the FastAPI response schemas
+// (apps/api/schemas/*.py). Keep these in sync with the backend.
+
+// ── Auth & two-key model ──────────────────────────────────────
+export interface UserOut {
+  id: string;
+  email: string;
+  display_name: string | null;
+  created_at: string;
+}
+
+export interface AdminOut {
+  id: string;
+  email: string;
+  created_at: string;
+}
+
+export interface UserProviderKey {
+  id: string;
+  provider: string; // 'vast' | 'runpod'
+  is_active: boolean;
+  api_key_masked: string | null;
+  vast_user_id: number | null;
+  detected_scopes: Record<string, unknown> | null;
+  last_validated_at: string | null;
+  last_synced_at: string | null;
+  created_at: string;
+}
+
+export interface PlatformKey {
+  id: string;
+  provider: string; // 'vast' | 'runpod'
+  is_active: boolean;
+  api_key_masked: string | null;
+  last_validated_at: string | null;
+  created_at: string;
+}
+
+export interface AdminObserverStatus {
+  platform_key_connected: boolean;
+  platform_key_provider: string | null;
+  platform_key_last_validated_at: string | null;
+  last_poll_at: string | null;
+  total_offer_snapshots: number;
+  total_clearing_events: number;
+  watched_classes_count: number;
+  poll_interval_seconds: number;
+  watched_classes: { gpu_name: string; num_gpus: number }[];
+}
 
 export interface HealthComponent {
   status: 'ok' | 'error';
@@ -155,6 +202,7 @@ export interface SimulatedHost {
   kwh_rate: number | null;
   vast_service_fee_pct: number;
   is_active: boolean;
+  is_simulated: boolean;
   created_at: string;
   break_even_floor: number | null;
 }

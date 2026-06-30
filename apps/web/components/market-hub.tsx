@@ -1,7 +1,8 @@
 'use client';
 
 import type { ClearingEvent } from '@vasthost/shared-types';
-import { Badge, DataState } from '@vasthost/ui';
+import { Badge, Button, DataState } from '@vasthost/ui';
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import {
   Area,
@@ -25,34 +26,49 @@ import { SortHeader, useSort } from '@/components/sort-header';
 import { UtilizationBar, demandLabel } from '@/components/utilization';
 import { Widget } from '@/components/widget';
 import { dph, num, pct, relativeTime } from '@/lib/format';
-import { useClearingEvents, useDistribution, useDistributionHistory } from '@/lib/hooks';
+import {
+  useClearingEvents,
+  useDistribution,
+  useDistributionHistory,
+  useMachines,
+} from '@/lib/hooks';
+import { MARKET_SOURCE_COLORS } from '@/lib/market-source';
 import { useClassStore } from '@/lib/store';
 
 const AXIS = { stroke: 'hsl(218 10% 58%)', fontSize: 11 };
 const GRID = 'hsl(222 12% 20%)';
+// Supply series is colored by market source; only Vast renders today (Part 4).
+const SUPPLY_COLOR = MARKET_SOURCE_COLORS.vast;
 
 const confidenceVariant = (c: string) =>
   c === 'HIGH' ? 'success' : c === 'LOW' ? 'muted' : 'warning';
 
-export default function MarketPage() {
+type Cls = { gpu_name: string; num_gpus: number };
+export type MarketHubMode = 'guest' | 'app';
+
+// One Market Intelligence hub, rendered in two modes (Part 8): guest (public
+// homepage, with a sign-up CTA) and app (signed-in, with the user's own rigs
+// overlaid). The leaderboard / scatter / deep-dive / confirmed-rentals feed are
+// identical between the two — only the overlays and CTA differ.
+export function MarketHub({ mode }: { mode: MarketHubMode }) {
   const cls = useClassStore((s) => s.selected);
+  const isApp = mode === 'app';
+
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Market Intelligence"
-        description="Live supply, demand, and pricing across the Vast GPU market — what rents, for how much, and how fast. All prices are per-GPU/hour."
+        description="Live supply, demand, and pricing across the GPU market — what rents, for how much, and how fast. All prices are per-GPU/hour."
       />
 
-      {/* State of the market */}
       <MarketSummary />
 
-      {/* Hero: the whole market at a glance */}
+      {mode === 'guest' ? <GuestCta /> : null}
+
       <MarketOverviewTable />
 
-      {/* Educational: where each GPU sits on price vs demand */}
       <PriceDemandScatter />
 
-      {/* Selected GPU deep-dive */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
         <h2 className="text-sm font-semibold text-fg">
           Deep dive — <span className="text-accent">{cls.gpu_name}</span>
@@ -60,9 +76,11 @@ export default function MarketPage() {
         <ClassSelector />
       </div>
 
+      {isApp ? <RigOverlayNote cls={cls} /> : null}
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <PriceDistributionWidget cls={cls} />
+          <PriceDistributionWidget cls={cls} mode={mode} />
         </div>
         <SelectedStatsCard cls={cls} />
       </div>
@@ -71,13 +89,72 @@ export default function MarketPage() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SupplyDemandWidget cls={cls} />
-        <ClearingEventsTable cls={cls} />
+        <ClearingEventsTable cls={cls} mode={mode} />
       </div>
     </div>
   );
 }
 
-function SelectedStatsCard({ cls }: { cls: { gpu_name: string; num_gpus: number } }) {
+function GuestCta() {
+  return (
+    <div className="flex flex-col items-start justify-between gap-3 rounded-lg border border-accent/30 bg-accent/10 px-4 py-3 sm:flex-row sm:items-center">
+      <div>
+        <div className="text-sm font-semibold text-fg">See where your rig ranks</div>
+        <div className="text-xs text-muted">
+          Connect your Vast key to overlay your own machines on this market, track earnings, and get
+          pricing intelligence — free.
+        </div>
+      </div>
+      <Link href="/signup">
+        <Button>Sign up free</Button>
+      </Link>
+    </div>
+  );
+}
+
+// App mode only: shows how the user's own machine on the selected GPU is priced
+// relative to the live market (the "your rig overlay").
+function useYourPrice(cls: Cls, mode: MarketHubMode): number | null {
+  const machines = useMachines(mode === 'app');
+  if (mode !== 'app') return null;
+  const m = (machines.data ?? []).find(
+    (x) => x.gpu_name === cls.gpu_name && x.current_price_gpu != null,
+  );
+  return m?.current_price_gpu ?? null;
+}
+
+function RigOverlayNote({ cls }: { cls: Cls }) {
+  const yourPrice = useYourPrice(cls, 'app');
+  const dist = useDistribution(cls.gpu_name, cls.num_gpus);
+  if (yourPrice == null) {
+    return (
+      <p className="text-xs text-muted">
+        No machine of yours on {cls.gpu_name} — connect a key in Settings, or pick a GPU you host to
+        see your position.
+      </p>
+    );
+  }
+  const d = dist.data;
+  let percentile: number | null = null;
+  if (d) {
+    const pts = [d.p10_price, d.p25_price, d.p50_price, d.p75_price, d.p90_price].filter(
+      (v): v is number => v != null,
+    );
+    const below = pts.filter((v) => v < yourPrice).length;
+    percentile = pts.length ? Math.round((below / pts.length) * 100) : null;
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-xs">
+      <Badge variant="accent">your rig</Badge>
+      <span className="text-fg">
+        Your {cls.gpu_name} is priced at {dph(yourPrice)}
+        {percentile != null ? ` — the ${percentile}th percentile of the market.` : '.'}
+      </span>
+    </div>
+  );
+}
+
+function SelectedStatsCard({ cls }: { cls: Cls }) {
   const dist = useDistribution(cls.gpu_name, cls.num_gpus);
   const events = useClearingEvents(cls.gpu_name, cls.num_gpus, 500);
 
@@ -162,8 +239,9 @@ function Stat2({ label, value, hint }: { label: string; value: React.ReactNode; 
   );
 }
 
-function PriceDistributionWidget({ cls }: { cls: { gpu_name: string; num_gpus: number } }) {
+function PriceDistributionWidget({ cls, mode }: { cls: Cls; mode: MarketHubMode }) {
   const dist = useDistribution(cls.gpu_name, cls.num_gpus);
+  const yourPrice = useYourPrice(cls, mode);
   return (
     <Widget
       title="Price Distribution"
@@ -185,7 +263,8 @@ function PriceDistributionWidget({ cls }: { cls: { gpu_name: string; num_gpus: n
       >
         {(d) => (
           <div className="flex flex-col gap-4 pt-2">
-            <DistributionBar dist={d} />
+            {/* Signed-in: overlay the user's own price marker on the bar. */}
+            <DistributionBar dist={d} yourPrice={yourPrice} />
             <div className="grid grid-cols-5 gap-2 text-center">
               {(
                 [
@@ -214,14 +293,14 @@ function PriceDistributionWidget({ cls }: { cls: { gpu_name: string; num_gpus: n
   );
 }
 
-function SupplyDemandWidget({ cls }: { cls: { gpu_name: string; num_gpus: number } }) {
+function SupplyDemandWidget({ cls }: { cls: Cls }) {
   const history = useDistributionHistory(cls.gpu_name, cls.num_gpus, 96);
   return (
     <Widget
       title="Supply · Demand · Price over time"
       action={
         <div className="flex items-center gap-3 text-[10px] text-muted">
-          <Legend color="hsl(243 75% 65%)" label="Supply" />
+          <Legend color={SUPPLY_COLOR} label="Supply" />
           <Legend color="hsl(160 70% 45%)" label="Util %" />
           <Legend color="hsl(43 90% 55%)" label="Median $" />
         </div>
@@ -314,10 +393,21 @@ function SupplyDemandWidget({ cls }: { cls: { gpu_name: string; num_gpus: number
 type EventSortKey = 'gpu' | 'region' | 'price' | 'dwell' | 'confidence' | 'when';
 const CONFIDENCE_RANK = { LOW: 0, MEDIUM: 1, HIGH: 2 } as const;
 
-function ClearingEventsTable({ cls }: { cls: { gpu_name: string; num_gpus: number } }) {
+function ClearingEventsTable({ cls, mode }: { cls: Cls; mode: MarketHubMode }) {
   const events = useClearingEvents(cls.gpu_name, cls.num_gpus, 50);
   const [confidence, setConfidence] = useState<'ALL' | 'HIGH' | 'MEDIUM' | 'LOW'>('ALL');
   const [region, setRegion] = useState<string>('ALL');
+
+  // Signed-in: highlight rentals in regions the user hosts in (their "own
+  // relevant entries" surfaced in the feed).
+  const machines = useMachines(mode === 'app');
+  const yourRegions = useMemo(() => {
+    const s = new Set<string>();
+    (machines.data ?? []).forEach((m) => {
+      if (m.gpu_name === cls.gpu_name && m.geolocation) s.add(m.geolocation);
+    });
+    return s;
+  }, [machines.data, cls.gpu_name]);
 
   const { state: sortState, sort } = useSort<ClearingEvent, EventSortKey>('when', 'desc', {
     gpu: (e) => e.gpu_name,
@@ -403,26 +493,36 @@ function ClearingEventsTable({ cls }: { cls: { gpu_name: string; num_gpus: numbe
                 </tr>
               </thead>
               <tbody>
-                {rows.map((e) => (
-                  <tr key={e.id} className="border-b border-border/50 hover:bg-border/20">
-                    <td className="px-4 py-2 text-fg">
-                      {e.gpu_name} ×{e.num_gpus}
-                    </td>
-                    <td className="px-4 py-2 text-muted">{e.geolocation ?? '—'}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-fg">
-                      {dph(e.last_price_gpu)}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-muted">
-                      {e.dwell_minutes != null ? `${e.dwell_minutes}m` : '—'}
-                    </td>
-                    <td className="px-4 py-2">
-                      <Badge variant={confidenceVariant(e.confidence)}>{e.confidence}</Badge>
-                    </td>
-                    <td className="px-4 py-2 text-right text-muted">
-                      {relativeTime(e.detected_at)}
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((e) => {
+                  const mine = mode === 'app' && e.geolocation != null && yourRegions.has(e.geolocation);
+                  return (
+                    <tr
+                      key={e.id}
+                      className={
+                        'border-b border-border/50 hover:bg-border/20 ' +
+                        (mine ? 'bg-accent/10' : '')
+                      }
+                    >
+                      <td className="px-4 py-2 text-fg">
+                        {e.gpu_name} ×{e.num_gpus}
+                        {mine ? <Badge variant="accent" className="ml-2">your region</Badge> : null}
+                      </td>
+                      <td className="px-4 py-2 text-muted">{e.geolocation ?? '—'}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-fg">
+                        {dph(e.last_price_gpu)}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-muted">
+                        {e.dwell_minutes != null ? `${e.dwell_minutes}m` : '—'}
+                      </td>
+                      <td className="px-4 py-2">
+                        <Badge variant={confidenceVariant(e.confidence)}>{e.confidence}</Badge>
+                      </td>
+                      <td className="px-4 py-2 text-right text-muted">
+                        {relativeTime(e.detected_at)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             <div className="px-4 pt-2 text-[11px] text-muted">

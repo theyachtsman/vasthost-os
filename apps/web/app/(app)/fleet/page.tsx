@@ -10,10 +10,10 @@ import { SimFleetCard } from '@/components/sim-fleet-card';
 import { Widget } from '@/components/widget';
 import { dph, gb, num, relativeTime, untilTime } from '@/lib/format';
 import {
-  useAccountStatus,
   useDistribution,
   useMachine,
   useMachines,
+  useProviderKeys,
   useSimulatedHosts,
 } from '@/lib/hooks';
 
@@ -26,13 +26,13 @@ function statusOf(m: Machine): { label: string; variant: 'success' | 'warning' |
 
 export default function FleetPage() {
   const machines = useMachines();
-  const account = useAccountStatus();
+  const keys = useProviderKeys();
   const simHosts = useSimulatedHosts();
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const connected = account.data?.connected;
+  const connected = (keys.data ?? []).some((k) => k.provider === 'vast' && k.is_active);
   const emptyMessage = connected
-    ? `No host machines found on ${account.data?.email ?? 'this account'}. This Vast account has no listed machines yet — once you host (and the key has the machine_read permission), they appear here automatically.`
+    ? 'No host machines found on your Vast account yet — once you host (and the key has the machine_read permission), they appear here automatically.'
     : 'Connect your Vast key in Settings to sync your fleet.';
 
   // No real machines but simulated rigs exist → exercise the surface with them.

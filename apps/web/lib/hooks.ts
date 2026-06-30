@@ -1,5 +1,7 @@
 import {
   type AccountStatus,
+  type AdminObserverStatus,
+  type AdminOut,
   type AvailableClass,
   type ClearingEvent,
   type DailyEarningPoint,
@@ -10,15 +12,149 @@ import {
   type Machine,
   type MachineDetail,
   type ObserverStatus,
+  type PlatformKey,
   type SimulatedHost,
   type SimulatedHostMarketContext,
+  type UserOut,
+  type UserProviderKey,
   type WatchedClass,
 } from '@vasthost/shared-types';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { api } from './api';
+import { ApiError, api } from './api';
 
 const q = (n: string) => encodeURIComponent(n);
+
+// ── User auth ──────────────────────────────────────────────────
+export const useMe = () =>
+  useQuery({
+    queryKey: ['me'],
+    // 401 → not logged in; surface as null rather than an error state.
+    queryFn: async () => {
+      try {
+        return await api.get<UserOut>('/auth/me');
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return null;
+        throw e;
+      }
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+
+export const useLogin = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { email: string; password: string }) =>
+      api.post<UserOut>('/auth/login', body),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+export const useRegister = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { email: string; password: string; display_name?: string }) =>
+      api.post<UserOut>('/auth/register', body),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+export const useLogout = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post('/auth/logout'),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+// ── User provider keys ─────────────────────────────────────────
+export const useProviderKeys = () =>
+  useQuery({
+    queryKey: ['provider-keys'],
+    queryFn: () => api.get<UserProviderKey[]>('/me/provider-keys'),
+    refetchInterval: 30_000,
+  });
+
+export const useConnectProviderKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { provider: string; api_key: string }) =>
+      api.post<UserProviderKey>('/me/provider-keys', body),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+export const useDisconnectProviderKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/me/provider-keys/${id}`),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+// ── Admin ──────────────────────────────────────────────────────
+export const useAdminMe = () =>
+  useQuery({
+    queryKey: ['admin-me'],
+    queryFn: async () => {
+      try {
+        return await api.get<AdminOut>('/admin/auth/me');
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return null;
+        throw e;
+      }
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+
+export const useAdminLogin = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { email: string; password: string }) =>
+      api.post<AdminOut>('/admin/auth/login', body),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+export const useAdminLogout = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post('/admin/auth/logout'),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+};
+
+export const usePlatformKeys = () =>
+  useQuery({
+    queryKey: ['platform-keys'],
+    queryFn: () => api.get<PlatformKey[]>('/admin/platform-keys'),
+  });
+
+export const useSetPlatformKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { provider: string; api_key: string }) =>
+      api.post<PlatformKey>('/admin/platform-keys', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['platform-keys'] }),
+  });
+};
+
+export const useDeletePlatformKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/admin/platform-keys/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['platform-keys'] }),
+  });
+};
+
+export const useAdminObserverStatus = () =>
+  useQuery({
+    queryKey: ['admin-observer-status'],
+    queryFn: () => api.get<AdminObserverStatus>('/admin/observer/status'),
+    refetchInterval: 30_000,
+  });
 
 // ── Health & account ───────────────────────────────────────────
 export const useHealth = () =>
@@ -52,11 +188,12 @@ export const useDisconnectAccount = () => {
 };
 
 // ── Fleet ──────────────────────────────────────────────────────
-export const useMachines = () =>
+export const useMachines = (enabled = true) =>
   useQuery({
     queryKey: ['machines'],
     queryFn: () => api.get<Machine[]>('/fleet/machines'),
     refetchInterval: 60_000,
+    enabled,
   });
 
 export const useMachine = (id: string | null) =>

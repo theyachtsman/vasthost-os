@@ -8,7 +8,6 @@ import { PageHeader } from '@/components/page-header';
 import { simFleetSummary } from '@/components/sim-fleet-card';
 import { dph, num, pct, relativeTime, usd } from '@/lib/format';
 import {
-  useAccountStatus,
   useClearingEvents,
   useDistribution,
   useEarningsDaily,
@@ -16,6 +15,7 @@ import {
   useHealth,
   useMachines,
   useObserverStatus,
+  useProviderKeys,
   useSimulatedHosts,
 } from '@/lib/hooks';
 import { useClassStore } from '@/lib/store';
@@ -62,9 +62,10 @@ function CardShell({
 
 function FleetOverviewCard() {
   const { data, isLoading, isError, error, refetch } = useMachines();
-  const account = useAccountStatus();
+  const keys = useProviderKeys();
   const simHosts = useSimulatedHosts();
-  const emptyMessage = account.data?.connected
+  const connected = (keys.data ?? []).some((k) => k.provider === 'vast' && k.is_active);
+  const emptyMessage = connected
     ? 'No host machines on this Vast account yet. Fleet fills in once you list machines (and the key has machine_read).'
     : 'Connect your Vast key in Settings to sync your fleet.';
 
