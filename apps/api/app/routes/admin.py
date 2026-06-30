@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from core.config import settings
 from core.crypto import decrypt, encrypt, mask
-from core.security import verify_password
+from core.security import hash_password, verify_password
 from db.session import get_db
 from models import (
     AdminUser,
@@ -27,6 +27,7 @@ from models import (
     WatchedClass,
 )
 from schemas.auth import (
+    AdminChangePasswordRequest,
     AdminLoginRequest,
     AdminObserverStatus,
     AdminOut,
@@ -69,6 +70,21 @@ def admin_logout(request: Request, response: Response, db: DbSession = Depends(g
 
 @router.get("/auth/me", response_model=AdminOut)
 def admin_me(admin: AdminUser = Depends(require_admin_session)) -> AdminOut:
+    return AdminOut.model_validate(admin)
+
+
+@router.post("/auth/change-password", response_model=AdminOut)
+def admin_change_password(
+    payload: AdminChangePasswordRequest,
+    admin: AdminUser = Depends(require_admin_session),
+    db: DbSession = Depends(get_db),
+) -> AdminOut:
+    """Set the admin's own password and clear the force-change flag — so the real
+    password lives only as a hash in the DB, never in .env."""
+    admin.password_hash = hash_password(payload.new_password)
+    admin.must_change_password = False
+    db.commit()
+    db.refresh(admin)
     return AdminOut.model_validate(admin)
 
 

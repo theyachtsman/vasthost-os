@@ -35,6 +35,11 @@ class AdminUser(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    # Seeded admins start with a temp password and must set their own on first
+    # login — so a real admin password never has to live in .env.
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     created_at: Mapped[datetime] = created_at_col()
 
 

@@ -65,10 +65,11 @@ def on_startup() -> None:
     if not settings.SECRET_KEY:
         logger.warning("SECRET_KEY not set — API key encryption will fail until configured")
 
-    # Seed the first admin from env (idempotent) so the admin console is reachable.
+    # Seed the first admin + restore the Observer platform key (both idempotent).
     try:
-        from services.seed import seed_admin
+        from services.seed import seed_admin, seed_platform_vast_key
 
         seed_admin()
+        seed_platform_vast_key()
     except Exception as exc:  # noqa: BLE001
-        logger.error("admin seeding failed: %s", exc)
+        logger.error("startup seeding failed: %s", exc)

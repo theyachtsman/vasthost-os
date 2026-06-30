@@ -125,6 +125,15 @@ export const useAdminLogout = () => {
   });
 };
 
+export const useAdminChangePassword = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { new_password: string }) =>
+      api.post<AdminOut>('/admin/auth/change-password', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-me'] }),
+  });
+};
+
 export const usePlatformKeys = () =>
   useQuery({
     queryKey: ['platform-keys'],

@@ -62,7 +62,12 @@ class AdminLoginRequest(BaseModel):
 class AdminOut(ORMModel):
     id: uuid.UUID
     email: str
+    must_change_password: bool = False
     created_at: datetime
+
+
+class AdminChangePasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8)
 
 
 # ── Platform keys (admin) ──────────────────────────────────────

@@ -12,6 +12,7 @@ export interface UserOut {
 export interface AdminOut {
   id: string;
   email: string;
+  must_change_password: boolean;
   created_at: string;
 }
 

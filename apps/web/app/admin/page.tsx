@@ -11,6 +11,7 @@ import { PageHeader } from '@/components/page-header';
 import { Widget } from '@/components/widget';
 import { num, relativeTime } from '@/lib/format';
 import {
+  useAdminChangePassword,
   useAdminLogout,
   useAdminMe,
   useAdminObserverStatus,
@@ -23,6 +24,12 @@ export default function AdminConsole() {
   const me = useAdminMe();
   const router = useRouter();
   const logout = useAdminLogout();
+
+  // First login after seeding: force a password change before anything else, so
+  // the real admin password never has to live in .env.
+  if (me.data?.must_change_password) {
+    return <ForcePasswordChange />;
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -57,6 +64,69 @@ export default function AdminConsole() {
         <PlatformKeyCard provider="vast" title="Platform Vast key" validates />
         <PlatformKeyCard provider="runpod" title="Platform RunPod key" validates={false} />
       </div>
+    </div>
+  );
+}
+
+function ForcePasswordChange() {
+  const change = useAdminChangePassword();
+  const [pw, setPw] = useState('');
+  const [confirm, setConfirm] = useState('');
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pw.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+    if (pw !== confirm) {
+      toast.error('Passwords do not match');
+      return;
+    }
+    change.mutate(
+      { new_password: pw },
+      {
+        onSuccess: () => toast.success('Password updated'),
+        onError: (e) => toast.error(e instanceof Error ? e.message : 'Update failed'),
+      },
+    );
+  };
+
+  return (
+    <div className="mx-auto flex max-w-sm flex-col gap-6 pt-12">
+      <div>
+        <h1 className="text-xl font-semibold text-fg">Set your admin password</h1>
+        <p className="text-sm text-muted">
+          You signed in with the temporary password. Choose a new one to continue — it is stored
+          only as a hash, never in any config file.
+        </p>
+      </div>
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="new-pw">New password</Label>
+          <Input
+            id="new-pw"
+            type="password"
+            autoComplete="new-password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+          />
+          <span className="text-[11px] text-muted">At least 8 characters.</span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="confirm-pw">Confirm password</Label>
+          <Input
+            id="confirm-pw"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+        </div>
+        <Button type="submit" disabled={change.isPending}>
+          {change.isPending ? 'Saving…' : 'Set password & continue'}
+        </Button>
+      </form>
     </div>
   );
 }
