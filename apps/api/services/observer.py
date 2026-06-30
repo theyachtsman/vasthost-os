@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from core.crypto import decrypt
 from models import (
     ClearingEvent,
@@ -126,6 +127,38 @@ def discover_classes(db: Session) -> int:
         added,
     )
     return added
+
+
+def ensure_default_watched_class(db: Session) -> None:
+    """Guarantee the Observer has at least one class to poll, so a fresh DB
+    starts recording immediately instead of waiting up to 30m for discovery."""
+    if db.scalar(select(WatchedClass).limit(1)) is not None:
+        return
+    db.add(
+        WatchedClass(
+            gpu_name=settings.observer_default_gpu,
+            num_gpus=settings.VAST_OBSERVER_DEFAULT_NUM_GPUS,
+            geolocation=None,
+        )
+    )
+    db.commit()
+    logger.info("seeded default watched class %s", settings.observer_default_gpu)
+
+
+def bootstrap_observer(db: Session) -> int:
+    """Bring the Observer to life right after a platform key appears: seed a
+    default class, discover the rest of the live market, take one poll, and
+    aggregate — so the Market hub shows data within a poll cycle instead of
+    waiting on the 30m discovery / 15m aggregation cadence. Idempotent."""
+    if _observer_client(db) is None:
+        logger.info("bootstrap: no platform key yet — skipping")
+        return 0
+    ensure_default_watched_class(db)
+    discover_classes(db)
+    written = market_observer_poll(db)
+    market_distribution_aggregate(db)
+    logger.info("bootstrap: observer primed (%s snapshots)", written)
+    return written
 
 
 def market_observer_poll(db: Session) -> int:

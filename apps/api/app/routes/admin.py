@@ -144,6 +144,17 @@ def set_platform_key(
     key.last_validated_at = validated_at
     db.commit()
     db.refresh(key)
+
+    # Prime the Observer immediately (discover + poll + aggregate) so the Market
+    # hub fills in within a poll cycle rather than waiting on the 30m discovery.
+    if payload.provider == "vast":
+        try:
+            from worker.celery_app import celery_app
+
+            celery_app.send_task("worker.tasks.bootstrap_observer")
+        except Exception as exc:  # noqa: BLE001 — best-effort; beat will catch up
+            logger.warning("could not enqueue observer bootstrap: %s", exc)
+
     return _key_out(key)
 
 

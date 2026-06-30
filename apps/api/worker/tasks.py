@@ -69,6 +69,17 @@ def market_distribution_aggregate() -> int:
         db.close()
 
 
+@celery_app.task(name="worker.tasks.bootstrap_observer")
+def bootstrap_observer() -> int:
+    """One-shot primer: seed a default class, discover, poll, aggregate. Enqueued
+    when a platform key is added and on API startup if a key already exists."""
+    db = SessionLocal()
+    try:
+        return observer_svc.bootstrap_observer(db)
+    finally:
+        db.close()
+
+
 @celery_app.task(name="worker.tasks.observer_discover")
 def observer_discover() -> int:
     """Auto-register GPU classes with live supply so the watched list maintains
