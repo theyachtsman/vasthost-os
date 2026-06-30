@@ -36,7 +36,7 @@ import {
   useMarketMeta,
 } from '@/lib/hooks';
 import { MARKET_SOURCE_COLORS } from '@/lib/market-source';
-import { useOwnedFleet } from '@/lib/owned';
+import { useAutoSelectOwnedClass, useOwnedFleet } from '@/lib/owned';
 import { useClassStore } from '@/lib/store';
 
 const AXIS = { stroke: 'hsl(218 10% 58%)', fontSize: 11 };
@@ -55,8 +55,11 @@ export type MarketHubMode = 'guest' | 'app';
 // overlaid). The leaderboard / scatter / deep-dive / confirmed-rentals feed are
 // identical between the two — only the overlays and CTA differ.
 export function MarketHub({ mode }: { mode: MarketHubMode }) {
-  const cls = useClassStore((s) => s.selected);
   const isApp = mode === 'app';
+  // Signed-in users with a fleet land on their own rig; everyone else starts with
+  // nothing selected and picks from the board.
+  useAutoSelectOwnedClass(isApp);
+  const cls = useClassStore((s) => s.selected);
   const meta = useMarketMeta();
   const owned = useOwnedFleet(isApp);
   const feePct = meta.data?.fee_pct ?? null;
@@ -83,34 +86,57 @@ export function MarketHub({ mode }: { mode: MarketHubMode }) {
 
       <PriceDemandScatter owned={owned.gpus} />
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
-        <h2 className="text-sm font-semibold text-fg">
-          Deep dive — <span className="text-accent">{cls.gpu_name}</span>
-          {isApp && owned.gpus.has(cls.gpu_name) ? (
-            <Badge variant="accent" className="ml-2">
-              you host this
-            </Badge>
-          ) : null}
-        </h2>
-        <ClassSelector />
-      </div>
+      {cls ? (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+            <h2 className="text-sm font-semibold text-fg">
+              Deep dive — <span className="text-accent">{cls.gpu_name}</span>
+              {isApp && owned.gpus.has(cls.gpu_name) ? (
+                <Badge variant="accent" className="ml-2">
+                  you host this
+                </Badge>
+              ) : null}
+            </h2>
+            <ClassSelector />
+          </div>
 
-      {isApp ? <RigOverlayNote cls={cls} /> : null}
+          {isApp ? <RigOverlayNote cls={cls} /> : null}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <PriceDistributionWidget cls={cls} mode={mode} feePct={feePct} />
-        </div>
-        <SelectedStatsCard cls={cls} />
-      </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <PriceDistributionWidget cls={cls} mode={mode} feePct={feePct} />
+            </div>
+            <SelectedStatsCard cls={cls} />
+          </div>
 
-      <SizeLadder />
+          <SizeLadder cls={cls} />
 
-      <MarketListings cls={cls} />
+          <MarketListings cls={cls} feePct={feePct} />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <SupplyDemandWidget cls={cls} />
-        <ClearingEventsTable cls={cls} mode={mode} />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <SupplyDemandWidget cls={cls} />
+            <ClearingEventsTable cls={cls} mode={mode} />
+          </div>
+        </>
+      ) : (
+        <DeepDivePlaceholder isApp={isApp} hasFleet={owned.hasAny} />
+      )}
+    </div>
+  );
+}
+
+// Shown when nothing is selected (no default GPU): prompts the user to pick a
+// card from the leaderboard or scatter to open the deep-dive.
+function DeepDivePlaceholder({ isApp, hasFleet }: { isApp: boolean; hasFleet: boolean }) {
+  return (
+    <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-bg/30 px-4 py-10 text-center">
+      <div className="text-sm font-medium text-fg">Pick a GPU to drill in</div>
+      <div className="max-w-md text-xs text-muted">
+        Click any row in the leaderboard or a dot in the scatter above to open its price
+        distribution, config sizes, and live per-server listings.
+        {isApp && !hasFleet
+          ? ' Connect a Vast key or add a simulated rig in Settings to land on your own market by default.'
+          : ''}
       </div>
     </div>
   );

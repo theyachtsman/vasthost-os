@@ -29,6 +29,9 @@ export function ClassSelector() {
     return m;
   }, [available.data, watched.data]);
 
+  // Only rendered once a GPU is selected; bail safely if not.
+  if (!selected) return null;
+
   const gpuNames = Array.from(byGpu.keys()).sort();
   const sizes = byGpu.get(selected.gpu_name) ?? [{ num_gpus: selected.num_gpus, supply: null }];
 

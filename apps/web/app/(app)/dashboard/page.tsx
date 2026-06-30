@@ -2,6 +2,7 @@
 
 import { Badge, Card, CardContent, CardHeader, CardTitle, DataState, Stat } from '@vasthost/ui';
 import { Activity, Cpu, Database, DollarSign, Radio, Server } from 'lucide-react';
+import Link from 'next/link';
 
 import { DistributionBar } from '@/components/distribution-bar';
 import { PageHeader } from '@/components/page-header';
@@ -18,9 +19,12 @@ import {
   useProviderKeys,
   useSimulatedHosts,
 } from '@/lib/hooks';
+import { useAutoSelectOwnedClass } from '@/lib/owned';
 import { useClassStore } from '@/lib/store';
 
 export default function DashboardPage() {
+  // Signed-in: default the market cards to the user's first rig.
+  useAutoSelectOwnedClass(true);
   const cls = useClassStore((s) => s.selected);
   return (
     <div className="flex flex-col gap-4">
@@ -31,12 +35,36 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         <FleetOverviewCard />
         <EarningsTodayCard />
-        <MarketPositionCard cls={cls} />
-        <MarketActivityCard cls={cls} />
+        {cls ? (
+          <MarketPositionCard cls={cls} />
+        ) : (
+          <NoClassSelected title="Market Position" icon={Activity} />
+        )}
+        {cls ? (
+          <MarketActivityCard cls={cls} />
+        ) : (
+          <NoClassSelected title="Market Activity" icon={Radio} />
+        )}
         <ObserverStatusCard />
         <SystemStatusCard />
       </div>
     </div>
+  );
+}
+
+// Market cards have no GPU to show until one is selected (a signed-in user with a
+// fleet auto-selects their first rig; otherwise they pick one on Market).
+function NoClassSelected({ title, icon }: { title: string; icon: typeof Activity }) {
+  return (
+    <CardShell title={title} icon={icon}>
+      <p className="text-xs text-muted">
+        No GPU selected yet — open{' '}
+        <Link href="/market" className="text-accent hover:underline">
+          Market Intelligence
+        </Link>{' '}
+        and pick a card, or connect a key / add a simulated rig to default to your own.
+      </p>
+    </CardShell>
   );
 }
 

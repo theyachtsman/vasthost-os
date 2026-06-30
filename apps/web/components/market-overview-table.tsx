@@ -91,7 +91,7 @@ export function MarketOverviewTable({
               <tbody>
                 {data.map((r) => {
                   const d = demandLabel(demandPct(r));
-                  const active = r.gpu_name === selected.gpu_name;
+                  const active = r.gpu_name === selected?.gpu_name;
                   const mine = owned?.has(r.gpu_name) ?? false;
                   return (
                     <tr

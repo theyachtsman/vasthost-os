@@ -6,13 +6,14 @@ import { UtilizationBar } from '@/components/utilization';
 import { Widget } from '@/components/widget';
 import { dph, hostTake, num } from '@/lib/format';
 import { useMarketMeta, useMarketSizes } from '@/lib/hooks';
-import { useClassStore } from '@/lib/store';
+import { type GpuClass, useClassStore } from '@/lib/store';
 
 // Per-GPU price + utilization across config sizes (×1, ×2, ×4, ×8 …) for the
 // selected GPU. Teaches whether whole-node configs command a per-GPU premium
-// and whether they rent more or less often.
-export function SizeLadder() {
-  const { gpu_name, num_gpus } = useClassStore((s) => s.selected);
+// and whether they rent more or less often. Clicking a size drives the deep-dive
+// (and the live listings) to that config.
+export function SizeLadder({ cls }: { cls: GpuClass }) {
+  const { gpu_name, num_gpus } = cls;
   const setSelected = useClassStore((s) => s.setSelected);
   const sizes = useMarketSizes(gpu_name);
   const feePct = useMarketMeta().data?.fee_pct ?? null;

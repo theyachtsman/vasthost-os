@@ -54,6 +54,22 @@ def _ts(value) -> datetime | None:
         return None
 
 
+def _verification(o: dict) -> str | None:
+    """Normalise an offer's verification status.
+
+    Vast's ``search offers`` payload carries this under ``verification`` (a string:
+    "verified" | "unverified" | "deverified") — NOT ``verified`` (which is the
+    machines endpoint's key, and is absent here, leaving the column blank). Accept
+    either, and coerce a stray bool form to the string vocabulary.
+    """
+    v = o.get("verification")
+    if v is None:
+        v = o.get("verified")
+    if isinstance(v, bool):
+        return "verified" if v else "unverified"
+    return v
+
+
 def _observer_client(db: Session) -> VastClient | None:
     """Read the admin-owned PLATFORM Vast key — the only credential the Observer
     is ever allowed to use. Re-scoped from the legacy per-account key to
@@ -204,7 +220,7 @@ def market_observer_poll(db: Session) -> int:
                 gpu_ram_mb=o.get("gpu_ram"),
                 gpu_max_power_w=o.get("gpu_max_power"),
                 reliability=o.get("reliability"),
-                verified=o.get("verified"),
+                verified=_verification(o),
                 geolocation=o.get("geolocation"),
                 price_gpu=price_per_gpu,
                 price_disk=o.get("storage_cost"),
