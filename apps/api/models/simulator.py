@@ -28,4 +28,9 @@ class SimulatedHost(Base):
         Numeric(5, 4), default=0.20, server_default="0.20"
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Distinguishes sandbox rigs from real per-user machines once they land via
+    # user_provider_keys. Fleet surfaces must never blend the two silently.
+    is_simulated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     created_at: Mapped[datetime] = created_at_col()

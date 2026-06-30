@@ -30,8 +30,11 @@ class AccountSnapshot(Base):
     __tablename__ = "account_snapshots"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    vast_account_id: Mapped[uuid.UUID] = mapped_column(
+    vast_account_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("vast_accounts.id")
+    )
+    user_provider_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user_provider_keys.id", ondelete="SET NULL")
     )
     recorded_at: Mapped[datetime] = created_at_col()
     balance: Mapped[float | None] = mapped_column(Numeric(10, 4))

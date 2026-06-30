@@ -204,6 +204,7 @@ class SimulatedHostIn(BaseModel):
 
 class SimulatedHostOut(SimulatedHostIn, ORMModel):
     id: uuid.UUID
+    is_simulated: bool = True
     created_at: datetime
     break_even_floor: float | None = None
 

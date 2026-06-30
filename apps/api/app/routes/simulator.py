@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from db.session import get_db
-from models import MarketDistribution, SimulatedHost
+from models import MarketDistribution, SimulatedHost, User
 from schemas.models import (
     ProjectionPoint,
     SimulatedHostIn,
@@ -13,6 +13,8 @@ from schemas.models import (
     SimulatedHostOut,
 )
 from services.calc import break_even_floor_per_gpu_hour, percentile_position
+
+from ..deps import require_user_session
 
 router = APIRouter()
 HOURS_PER_MONTH = 730.0
@@ -29,14 +31,22 @@ def _to_out(host: SimulatedHost) -> SimulatedHostOut:
 
 
 @router.get("/hosts", response_model=list[SimulatedHostOut])
-def list_hosts(db: Session = Depends(get_db)) -> list[SimulatedHostOut]:
+def list_hosts(
+    user: User = Depends(require_user_session), db: Session = Depends(get_db)
+) -> list[SimulatedHostOut]:
     rows = db.scalars(select(SimulatedHost).order_by(SimulatedHost.created_at.desc()))
     return [_to_out(h) for h in rows]
 
 
 @router.post("/hosts", response_model=SimulatedHostOut)
-def create_host(payload: SimulatedHostIn, db: Session = Depends(get_db)) -> SimulatedHostOut:
-    host = SimulatedHost(**payload.model_dump())
+def create_host(
+    payload: SimulatedHostIn,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> SimulatedHostOut:
+    # Sandbox rigs are always simulated — the marker is what keeps them visually
+    # distinct from real per-user machines on Fleet surfaces.
+    host = SimulatedHost(**payload.model_dump(), is_simulated=True)
     db.add(host)
     db.commit()
     db.refresh(host)
@@ -45,7 +55,10 @@ def create_host(payload: SimulatedHostIn, db: Session = Depends(get_db)) -> Simu
 
 @router.put("/hosts/{host_id}", response_model=SimulatedHostOut)
 def update_host(
-    host_id: uuid.UUID, payload: SimulatedHostIn, db: Session = Depends(get_db)
+    host_id: uuid.UUID,
+    payload: SimulatedHostIn,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
 ) -> SimulatedHostOut:
     host = db.get(SimulatedHost, host_id)
     if host is None:
@@ -58,7 +71,11 @@ def update_host(
 
 
 @router.delete("/hosts/{host_id}")
-def delete_host(host_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
+def delete_host(
+    host_id: uuid.UUID,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> dict:
     host = db.get(SimulatedHost, host_id)
     if host is None:
         raise HTTPException(status_code=404, detail="Simulated host not found")
@@ -68,7 +85,11 @@ def delete_host(host_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/hosts/{host_id}/market-context", response_model=SimulatedHostMarketContext)
-def market_context(host_id: uuid.UUID, db: Session = Depends(get_db)) -> SimulatedHostMarketContext:
+def market_context(
+    host_id: uuid.UUID,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> SimulatedHostMarketContext:
     """Project a simulated host's economics against the live market.
 
     Vast prices per-GPU, so we use the host's GPU class distribution — preferring

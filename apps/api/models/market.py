@@ -19,6 +19,9 @@ class OfferSnapshot(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    market_source: Mapped[str] = mapped_column(
+        String, nullable=False, default="vast", server_default="vast"
+    )  # 'vast' | 'runpod' (reserved)
     offer_id: Mapped[int] = mapped_column(Integer, nullable=False)
     machine_id: Mapped[int | None] = mapped_column(Integer)
     gpu_name: Mapped[str] = mapped_column(String, nullable=False)
@@ -48,6 +51,9 @@ class ClearingEvent(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    market_source: Mapped[str] = mapped_column(
+        String, nullable=False, default="vast", server_default="vast"
+    )  # 'vast' | 'runpod' (reserved)
     offer_id: Mapped[int] = mapped_column(Integer, nullable=False)
     gpu_name: Mapped[str | None] = mapped_column(String)
     num_gpus: Mapped[int | None] = mapped_column(Integer)
@@ -66,6 +72,9 @@ class MarketDistribution(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    market_source: Mapped[str] = mapped_column(
+        String, nullable=False, default="vast", server_default="vast"
+    )  # 'vast' | 'runpod' (reserved)
     gpu_name: Mapped[str] = mapped_column(String, nullable=False)
     num_gpus: Mapped[int] = mapped_column(Integer, nullable=False)
     verified: Mapped[str | None] = mapped_column(String)

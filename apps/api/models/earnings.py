@@ -17,8 +17,11 @@ class EarningsDaily(Base):
     __table_args__ = (UniqueConstraint("machine_id", "earn_date", name="uq_earnings_machine_day"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    vast_account_id: Mapped[uuid.UUID] = mapped_column(
+    vast_account_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("vast_accounts.id")
+    )
+    user_provider_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user_provider_keys.id", ondelete="SET NULL")
     )
     machine_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("host_machines.id")
@@ -43,7 +46,7 @@ class CostConfig(Base):
     __tablename__ = "cost_config"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    vast_account_id: Mapped[uuid.UUID] = mapped_column(
+    vast_account_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("vast_accounts.id")
     )
     machine_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -8,6 +8,7 @@ psycopg[binary]==3.2.3
 redis==5.2.1
 celery==5.4.0
 cryptography==46.0.5  # pinned to match vastai 1.1.3's exact requirement
+bcrypt==4.2.1  # password hashing; standalone C ext, no cryptography dependency
 vastai==1.1.3
 tenacity==9.0.0
 python-dateutil==2.9.0.post0

@@ -18,10 +18,21 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core.crypto import decrypt
-from models import ClearingEvent, MarketDistribution, OfferSnapshot, VastAccount, WatchedClass
+from models import (
+    ClearingEvent,
+    MarketDistribution,
+    OfferSnapshot,
+    PlatformProviderKey,
+    WatchedClass,
+)
 
 from .calc import percentile
 from .vast_client import VastClient
+
+# The Observer is exclusively PLATFORM-key-driven (admin-owned, read-only market
+# polling). It must never read a user's personal key — that key only ever touches
+# that user's own fleet/earnings/pricing.
+MARKET_SOURCE = "vast"
 
 logger = logging.getLogger("vasthost.observer")
 
@@ -43,11 +54,19 @@ def _ts(value) -> datetime | None:
 
 
 def _observer_client(db: Session) -> VastClient | None:
-    """Any active account's key is fine for reading PUBLIC offers."""
-    account = db.scalar(select(VastAccount).where(VastAccount.is_active.is_(True)))
-    if account is None:
+    """Read the admin-owned PLATFORM Vast key — the only credential the Observer
+    is ever allowed to use. Re-scoped from the legacy per-account key to
+    ``platform_provider_keys`` (Part 1); the migration seeds this from the
+    existing account so polling continues with zero gap."""
+    key = db.scalar(
+        select(PlatformProviderKey).where(
+            PlatformProviderKey.provider == "vast",
+            PlatformProviderKey.is_active.is_(True),
+        )
+    )
+    if key is None:
         return None
-    return VastClient(decrypt(account.vast_api_key))
+    return VastClient(decrypt(key.encrypted_api_key))
 
 
 def _watched(db: Session) -> list[WatchedClass]:

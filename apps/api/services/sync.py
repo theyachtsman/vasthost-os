@@ -1,4 +1,9 @@
-"""Fleet & earnings sync — operate on the PRIVATE account tables only."""
+"""Fleet & earnings sync — PRIVATE per-user data, driven by a user's own key.
+
+Each user's fleet/earnings is scoped to their ``user_provider_keys`` row. The
+worker fans out over active keys and each gets its own Vast client (no shared
+rate-limit budget). Every decrypt-and-use is audited (Part 2 item 4).
+"""
 
 from __future__ import annotations
 
@@ -15,12 +20,13 @@ from models import (
     HostMachine,
     ReliabilityHistory,
     RentalContract,
-    VastAccount,
+    UserProviderKey,
 )
 
+from .provider_keys import audit
 from .vast_client import VastClient
 
-logger = logging.getLogger("vasthost.sync")
+logger = logging.getLogger("gpuiq.sync")
 
 
 def _ts(value) -> datetime | None:
@@ -32,17 +38,23 @@ def _ts(value) -> datetime | None:
         return None
 
 
-def _client_for(account: VastAccount) -> VastClient:
-    return VastClient(decrypt(account.vast_api_key))
+def _client_for(key: UserProviderKey) -> VastClient:
+    return VastClient(decrypt(key.encrypted_api_key))
 
 
-def fleet_sync(db: Session, account: VastAccount) -> int:
-    """Sync show_machines() enriched by search offers (machine_id filter).
+def fleet_sync(db: Session, key: UserProviderKey) -> int:
+    """Sync show_machines() for one user key, enriched by search offers.
 
-    Returns the number of machines upserted.
+    Returns the number of machines upserted. Scoped to ``key.user_id`` via
+    ``user_provider_key_id`` on every row.
     """
-    client = _client_for(account)
-    machines = client.show_machines()
+    try:
+        client = _client_for(key)
+        machines = client.show_machines()
+    except Exception as exc:  # noqa: BLE001
+        audit(db, user_id=key.user_id, provider=key.provider, action="fleet_sync",
+              success=False, error_message=str(exc)[:300])
+        raise
     now = datetime.now(UTC)
     count = 0
 
@@ -62,10 +74,10 @@ def fleet_sync(db: Session, account: VastAccount) -> int:
 
         # Bind the two source dicts at definition time (pick is called within
         # this same loop iteration, so capturing them as defaults is correct).
-        def pick(key, *fallbacks, default=None, _sources=(m, offer)):
+        def pick(key_name, *fallbacks, default=None, _sources=(m, offer)):
             for src in _sources:
-                if key in src and src[key] is not None:
-                    return src[key]
+                if key_name in src and src[key_name] is not None:
+                    return src[key_name]
             for fb in fallbacks:
                 for src in _sources:
                     if fb in src and src[fb] is not None:
@@ -74,13 +86,13 @@ def fleet_sync(db: Session, account: VastAccount) -> int:
 
         machine = db.scalar(
             select(HostMachine).where(
-                HostMachine.vast_account_id == account.id,
+                HostMachine.user_provider_key_id == key.id,
                 HostMachine.machine_id == int(vast_machine_id),
             )
         )
         if machine is None:
             machine = HostMachine(
-                vast_account_id=account.id, machine_id=int(vast_machine_id)
+                user_provider_key_id=key.id, machine_id=int(vast_machine_id)
             )
             db.add(machine)
 
@@ -139,25 +151,31 @@ def fleet_sync(db: Session, account: VastAccount) -> int:
 
         count += 1
 
-    account.last_synced_at = now
+    key.last_synced_at = now
     db.commit()
-    logger.info("fleet_sync: %s machines for account %s", count, account.id)
+    audit(db, user_id=key.user_id, provider=key.provider, action="fleet_sync", success=True)
+    logger.info("fleet_sync: %s machines for user_provider_key %s", count, key.id)
     return count
 
 
-def earnings_sync(db: Session, account: VastAccount, last_days: int = 90) -> int:
+def earnings_sync(db: Session, key: UserProviderKey, last_days: int = 90) -> int:
     """Sync show_earnings(); upsert earnings_daily, update account_snapshots."""
-    client = _client_for(account)
-    data = client.show_earnings(last_days=last_days)
+    try:
+        client = _client_for(key)
+        data = client.show_earnings(last_days=last_days)
+    except Exception as exc:  # noqa: BLE001
+        audit(db, user_id=key.user_id, provider=key.provider, action="earnings_sync",
+              success=False, error_message=str(exc)[:300])
+        raise
     if not isinstance(data, dict):
         logger.warning("earnings_sync: unexpected payload type %s", type(data))
         return 0
 
-    # Map Vast machine_id -> our host_machines.id
+    # Map Vast machine_id -> our host_machines.id (scoped to this key).
     machine_map = {
         hm.machine_id: hm.id
         for hm in db.scalars(
-            select(HostMachine).where(HostMachine.vast_account_id == account.id)
+            select(HostMachine).where(HostMachine.user_provider_key_id == key.id)
         )
     }
 
@@ -172,14 +190,14 @@ def earnings_sync(db: Session, account: VastAccount, last_days: int = 90) -> int
         # per_day rows in Vast are account-wide; attribute to a NULL machine.
         existing = db.scalar(
             select(EarningsDaily).where(
-                EarningsDaily.vast_account_id == account.id,
+                EarningsDaily.user_provider_key_id == key.id,
                 EarningsDaily.machine_id.is_(None),
                 EarningsDaily.earn_date == earn_date,
             )
         )
         if existing is None:
             existing = EarningsDaily(
-                vast_account_id=account.id, machine_id=None, earn_date=earn_date
+                user_provider_key_id=key.id, machine_id=None, earn_date=earn_date
             )
             db.add(existing)
         existing.gpu_earn = day.get("gpu_earn", 0) or 0
@@ -203,7 +221,7 @@ def earnings_sync(db: Session, account: VastAccount, last_days: int = 90) -> int
         )
         if existing is None:
             existing = EarningsDaily(
-                vast_account_id=account.id, machine_id=our_id, earn_date=today
+                user_provider_key_id=key.id, machine_id=our_id, earn_date=today
             )
             db.add(existing)
         existing.gpu_earn = pm.get("gpu_earn", 0) or 0
@@ -216,16 +234,15 @@ def earnings_sync(db: Session, account: VastAccount, last_days: int = 90) -> int
     if current:
         db.add(
             AccountSnapshot(
-                vast_account_id=account.id,
+                user_provider_key_id=key.id,
                 balance=current.get("balance"),
                 service_fee=current.get("service_fee"),
                 total_credit=current.get("credit"),
             )
         )
-        if current.get("balance") is not None:
-            account.account_balance = current["balance"]
 
-    account.last_synced_at = datetime.now(UTC)
+    key.last_synced_at = datetime.now(UTC)
     db.commit()
-    logger.info("earnings_sync: %s rows for account %s", rows, account.id)
+    audit(db, user_id=key.user_id, provider=key.provider, action="earnings_sync", success=True)
+    logger.info("earnings_sync: %s rows for user_provider_key %s", rows, key.id)
     return rows

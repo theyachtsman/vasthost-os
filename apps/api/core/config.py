@@ -20,8 +20,21 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@postgres:5432/vasthost"
     REDIS_URL: str = "redis://redis:6379/0"
 
-    # Crypto — used to encrypt stored Vast API keys at rest.
+    # Crypto — used to encrypt stored provider API keys at rest.
     SECRET_KEY: str | None = None
+
+    # Auth — opaque session tokens are stored hashed; these control lifetime and
+    # cookie naming. User and admin sessions use *different* cookie names so the
+    # two surfaces never share scope.
+    SESSION_COOKIE_NAME: str = "gpuiq_session"
+    ADMIN_SESSION_COOKIE_NAME: str = "gpuiq_admin_session"
+    SESSION_TTL_HOURS: int = 24 * 30  # 30 days
+    SESSION_COOKIE_SECURE: bool = False  # LAN/HTTP deploy — set true behind TLS
+
+    # Admin account seeding (Part 10). Real values live only in the untracked
+    # .env on the deploy machine — never committed.
+    ADMIN_SEED_EMAIL: str | None = None
+    ADMIN_SEED_PASSWORD: str | None = None
 
     # Dev flags
     ALLOW_ALL_CORS: bool = True

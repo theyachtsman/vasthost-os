@@ -5,18 +5,30 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
 
-from .routes import account, earnings, fleet, health, market, simulator
+from .routes import (
+    account,
+    admin,
+    auth,
+    earnings,
+    fleet,
+    health,
+    market,
+    provider_keys,
+    simulator,
+)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
-logger = logging.getLogger("vasthost.api")
+logger = logging.getLogger("gpuiq.api")
 
 app = FastAPI(
-    title="VastHost OS API",
-    version="0.1.0",
-    description="Host-side GPU business intelligence platform for Vast.ai hosts.",
+    title="GPUIQ API",
+    version="0.2.0",
+    description="GPU marketplace intelligence + host automation — public Market "
+    "Intelligence (platform-key Observer) and per-user fleet/earnings/pricing "
+    "(user keys).",
 )
 
 if settings.ALLOW_ALL_CORS:
@@ -28,25 +40,35 @@ if settings.ALLOW_ALL_CORS:
         allow_headers=["*"],
     )
 
+# Public + health
 app.include_router(health.router, tags=["health"])
-app.include_router(account.router, prefix="/account", tags=["account"])
+app.include_router(market.router, prefix="/market", tags=["market"])
+
+# Auth
+app.include_router(auth.router, prefix="/auth", tags=["auth"])
+app.include_router(admin.router, prefix="/admin", tags=["admin"])
+
+# User-session-gated
+app.include_router(provider_keys.router, prefix="/me", tags=["me"])
 app.include_router(fleet.router, prefix="/fleet", tags=["fleet"])
 app.include_router(earnings.router, prefix="/earnings", tags=["earnings"])
-app.include_router(market.router, prefix="/market", tags=["market"])
 app.include_router(simulator.router, prefix="/simulator", tags=["simulator"])
+
+# Legacy single-account routes (retained for backward compatibility; the
+# two-key model supersedes them — see /me/provider-keys and /admin/platform-keys).
+app.include_router(account.router, prefix="/account", tags=["account"])
 
 
 @app.on_event("startup")
 def on_startup() -> None:
-    logger.info("VastHost OS API starting up")
+    logger.info("GPUIQ API starting up")
     if not settings.SECRET_KEY:
         logger.warning("SECRET_KEY not set — API key encryption will fail until configured")
-    # Validate the optionally-provided env key so misconfig surfaces early.
-    if settings.VAST_API_KEY:
-        try:
-            from services.vast_client import VastClient
 
-            user = VastClient(settings.VAST_API_KEY).show_user()
-            logger.info("Vast key from env validated for user id=%s", user.get("id"))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Env VAST_API_KEY failed validation: %s", exc)
+    # Seed the first admin from env (idempotent) so the admin console is reachable.
+    try:
+        from services.seed import seed_admin
+
+        seed_admin()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("admin seeding failed: %s", exc)

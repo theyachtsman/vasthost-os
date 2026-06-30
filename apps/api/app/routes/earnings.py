@@ -1,3 +1,6 @@
+"""Earnings & financials — user-session-gated, scoped to the caller's key(s)."""
+
+import uuid
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +14,8 @@ from models import (
     EarningsDaily,
     HostMachine,
     RentalContract,
-    VastAccount,
+    User,
+    UserProviderKey,
 )
 from schemas.models import (
     CostConfigIn,
@@ -22,29 +26,39 @@ from schemas.models import (
 )
 from services.calc import est_power_cost_per_day
 
+from ..deps import require_user_session
+
 router = APIRouter()
 
 
-def _account(db: Session) -> VastAccount | None:
-    return db.scalar(select(VastAccount).where(VastAccount.is_active.is_(True)))
+def _user_key_ids(db: Session, user: User) -> list[uuid.UUID]:
+    return list(
+        db.scalars(select(UserProviderKey.id).where(UserProviderKey.user_id == user.id))
+    )
 
 
 @router.get("/summary", response_model=EarningsSummary)
-def summary(db: Session = Depends(get_db)) -> EarningsSummary:
-    account = _account(db)
-    if account is None:
-        raise HTTPException(status_code=404, detail="No account connected")
+def summary(
+    user: User = Depends(require_user_session), db: Session = Depends(get_db)
+) -> EarningsSummary:
+    key_ids = _user_key_ids(db, user)
+    if not key_ids:
+        raise HTTPException(status_code=404, detail="No provider key connected")
 
     month_start = date.today().replace(day=1)
 
-    # Per-machine month-to-date totals.
     machines = list(
-        db.scalars(select(HostMachine).where(HostMachine.vast_account_id == account.id))
+        db.scalars(
+            select(HostMachine).where(HostMachine.user_provider_key_id.in_(key_ids))
+        )
     )
+    machine_ids = [m.id for m in machines]
     cost_by_machine = {
         c.machine_id: c
-        for c in db.scalars(
-            select(CostConfig).where(CostConfig.vast_account_id == account.id)
+        for c in (
+            db.scalars(select(CostConfig).where(CostConfig.machine_id.in_(machine_ids)))
+            if machine_ids
+            else []
         )
     }
 
@@ -69,7 +83,6 @@ def summary(db: Session = Depends(get_db)) -> EarningsSummary:
         est_cost = None
         net = None
         if cost and cost.kwh_rate is not None:
-            # Approximate this-month utilization via active contract presence.
             active = db.scalar(
                 select(func.count(RentalContract.id)).where(
                     RentalContract.machine_id == m.id, RentalContract.status == "active"
@@ -98,7 +111,6 @@ def summary(db: Session = Depends(get_db)) -> EarningsSummary:
             )
         )
 
-    # Account-wide month totals (from account-attributed daily rows + per-machine).
     totals = db.execute(
         select(
             func.coalesce(func.sum(EarningsDaily.gpu_earn), 0),
@@ -107,20 +119,20 @@ def summary(db: Session = Depends(get_db)) -> EarningsSummary:
                 func.sum(EarningsDaily.bw_upload_earn + EarningsDaily.bw_download_earn), 0
             ),
         ).where(
-            EarningsDaily.vast_account_id == account.id,
+            EarningsDaily.user_provider_key_id.in_(key_ids),
             EarningsDaily.earn_date >= month_start,
         )
     ).one()
 
     all_time = db.scalar(
         select(func.coalesce(func.sum(EarningsDaily.total_earn), 0)).where(
-            EarningsDaily.vast_account_id == account.id
+            EarningsDaily.user_provider_key_id.in_(key_ids)
         )
     )
 
     latest_snap = db.scalar(
         select(AccountSnapshot)
-        .where(AccountSnapshot.vast_account_id == account.id)
+        .where(AccountSnapshot.user_provider_key_id.in_(key_ids))
         .order_by(AccountSnapshot.recorded_at.desc())
     )
 
@@ -134,7 +146,9 @@ def summary(db: Session = Depends(get_db)) -> EarningsSummary:
             if latest_snap and latest_snap.service_fee
             else None
         ),
-        balance=float(account.account_balance) if account.account_balance else None,
+        balance=(
+            float(latest_snap.balance) if latest_snap and latest_snap.balance is not None else None
+        ),
         all_time_total=round(float(all_time or 0), 6),
         per_machine=per_machine,
     )
@@ -143,11 +157,12 @@ def summary(db: Session = Depends(get_db)) -> EarningsSummary:
 @router.get("/daily", response_model=list[DailyEarningPoint])
 def daily(
     days: int = Query(30, ge=1, le=365),
+    user: User = Depends(require_user_session),
     db: Session = Depends(get_db),
 ) -> list[DailyEarningPoint]:
-    account = _account(db)
-    if account is None:
-        raise HTTPException(status_code=404, detail="No account connected")
+    key_ids = _user_key_ids(db, user)
+    if not key_ids:
+        raise HTTPException(status_code=404, detail="No provider key connected")
 
     since = date.today() - timedelta(days=days)
     rows = db.execute(
@@ -158,7 +173,7 @@ def daily(
             func.sum(EarningsDaily.bw_upload_earn + EarningsDaily.bw_download_earn),
         )
         .where(
-            EarningsDaily.vast_account_id == account.id,
+            EarningsDaily.user_provider_key_id.in_(key_ids),
             EarningsDaily.earn_date >= since,
         )
         .group_by(EarningsDaily.earn_date)
@@ -183,25 +198,22 @@ def daily(
 
 
 @router.post("/cost-config", response_model=CostConfigOut)
-def set_cost_config(payload: CostConfigIn, db: Session = Depends(get_db)) -> CostConfigOut:
-    account = _account(db)
-    if account is None:
-        raise HTTPException(status_code=404, detail="No account connected")
+def set_cost_config(
+    payload: CostConfigIn,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> CostConfigOut:
+    key_ids = _user_key_ids(db, user)
     machine = db.get(HostMachine, payload.machine_id)
-    if machine is None:
+    if machine is None or machine.user_provider_key_id not in key_ids:
         raise HTTPException(status_code=404, detail="Machine not found")
 
     if payload.gpu_max_power_w is not None:
         machine.gpu_max_power_w = payload.gpu_max_power_w
 
-    cfg = db.scalar(
-        select(CostConfig).where(
-            CostConfig.vast_account_id == account.id,
-            CostConfig.machine_id == payload.machine_id,
-        )
-    )
+    cfg = db.scalar(select(CostConfig).where(CostConfig.machine_id == payload.machine_id))
     if cfg is None:
-        cfg = CostConfig(vast_account_id=account.id, machine_id=payload.machine_id)
+        cfg = CostConfig(machine_id=payload.machine_id)
         db.add(cfg)
     cfg.kwh_rate = payload.kwh_rate
     db.commit()

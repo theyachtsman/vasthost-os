@@ -16,8 +16,13 @@ class HostMachine(Base):
     __tablename__ = "host_machines"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    vast_account_id: Mapped[uuid.UUID] = mapped_column(
+    vast_account_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("vast_accounts.id")
+    )
+    # Multi-tenant owner (the user's connected key). Backfilled from the legacy
+    # single-account data when the operator connects their key in Settings.
+    user_provider_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user_provider_keys.id", ondelete="SET NULL")
     )
     machine_id: Mapped[int] = mapped_column(Integer, nullable=False)  # Vast's machine_id
     gpu_name: Mapped[str | None] = mapped_column(String)
