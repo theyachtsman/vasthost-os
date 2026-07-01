@@ -14,6 +14,7 @@ separate modules so the ownership boundary is visible at import sites.
 """
 
 from .account import AccountSnapshot, VastAccount, WatchedClass
+from .alerting import AlertSettings
 from .auth import AdminSession, AdminUser, Session, User, UserEntitlement
 from .earnings import CostConfig, EarningsDaily
 from .fleet import HostMachine, ReliabilityHistory, RentalContract
@@ -44,4 +45,5 @@ __all__ = [
     "MarketDistribution",
     "PriceChangeEvent",
     "SimulatedHost",
+    "AlertSettings",
 ]

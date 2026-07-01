@@ -45,6 +45,20 @@ class HostMachine(Base):
     min_bid_price: Mapped[float | None] = mapped_column(Numeric(10, 6))
     offer_end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Offer Management — Vast's "default job": a background container that
+    # launches automatically whenever this machine is idle, at a host-set
+    # price (self-renting idle GPU time instead of earning nothing). Set/
+    # cleared only via PUT/DELETE /offers/machines/{id}/defjob — fleet_sync
+    # never touches these (Vast's show_machines() response has no defjob
+    # fields to clobber them with).
+    defjob_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    defjob_image: Mapped[str | None] = mapped_column(String)
+    defjob_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    defjob_price_inetu: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    defjob_price_inetd: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    defjob_args: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
 

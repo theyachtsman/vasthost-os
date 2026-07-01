@@ -95,6 +95,14 @@ export interface Machine {
   // updates current_price_gpu (asking) immediately, same as Vast, but this
   // stays fixed until the active rental ends.
   active_locked_price_gpu: number | null;
+  // Offer Management — Vast's "default job": a background container that
+  // runs on this machine whenever it's idle, at a host-set price.
+  defjob_enabled: boolean;
+  defjob_image: string | null;
+  defjob_price_gpu: number | null;
+  defjob_price_inetu: number | null;
+  defjob_price_inetd: number | null;
+  defjob_args: string | null;
 }
 
 export interface Contract {
@@ -222,6 +230,26 @@ export interface SimulatedHost {
   rented_until: string | null;
   locked_price_gpu: number | null;
   is_rented: boolean;
+  // Mirrors HostMachine.offer_end_date — lets the Alerting offer-expiry
+  // threshold be tested against a simulated rig.
+  offer_end_date: string | null;
+  // Offer Management sandbox — set/cleared only via PUT/DELETE .../defjob.
+  defjob_enabled: boolean;
+  defjob_image: string | null;
+  defjob_price_gpu: number | null;
+  defjob_price_inetu: number | null;
+  defjob_price_inetd: number | null;
+  defjob_args: string | null;
+}
+
+// Offer Management — Vast's "default job" / backfill config.
+export interface DefjobConfig {
+  enabled: boolean;
+  image: string | null;
+  price_gpu: number | null;
+  price_inetu: number | null;
+  price_inetd: number | null;
+  args: string | null;
 }
 
 export interface WatchedClass {
@@ -405,4 +433,30 @@ export interface SimulatedHostMarketContext {
   break_even_percentile: number | null;
   has_market_data: boolean;
   projections: ProjectionPoint[];
+}
+
+// ── Alerting ───────────────────────────────────────────────────
+// Four independently-toggleable alert types, global per user, applied
+// identically to real machines and simulated rigs.
+export interface AlertSettingsConfig {
+  id: string;
+  offer_expiry_enabled: boolean;
+  offer_expiry_threshold_hours: number;
+  idle_enabled: boolean;
+  idle_threshold_hours: number;
+  rented_enabled: boolean;
+  rented_threshold_hours: number;
+  offline_enabled: boolean;
+  updated_at: string;
+}
+
+export interface RigAlert {
+  kind: 'offer_expiry' | 'idle' | 'rented' | 'offline';
+  id: string;
+  label: string;
+  gpu_name: string | null;
+  num_gpus: number | null;
+  simulated: boolean;
+  detail: string;
+  severity: 'warning' | 'danger';
 }

@@ -1,11 +1,13 @@
 import {
   type AdminObserverStatus,
   type AdminOut,
+  type AlertSettingsConfig,
   type AutopilotStepResult,
   type AvailableClass,
   type BulkApplyResult,
   type ClearingEvent,
   type DailyEarningPoint,
+  type DefjobConfig,
   type Distribution,
   type EarningsSummary,
   type MarketListingRow,
@@ -18,6 +20,7 @@ import {
   type PlatformKey,
   type PriceChangeEvent,
   type PricingRecommendation,
+  type RigAlert,
   type SimulatedHost,
   type SimulatedHostMarketContext,
   type SimulatedPricingRecommendation,
@@ -370,6 +373,32 @@ export const useBulkApplyPrice = () => {
   });
 };
 
+// Offer Management — Vast's "default job" (backfill) config.
+export type DefjobInput = {
+  image: string;
+  price_gpu: number;
+  price_inetu: number;
+  price_inetd: number;
+  args?: string | null;
+};
+
+export const useSetDefjob = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ machineId, payload }: { machineId: string; payload: DefjobInput }) =>
+      api.put<DefjobConfig>(`/offers/machines/${machineId}/defjob`, payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['machines'] }),
+  });
+};
+
+export const useRemoveDefjob = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (machineId: string) => api.del<DefjobConfig>(`/offers/machines/${machineId}/defjob`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['machines'] }),
+  });
+};
+
 // ── Simulator ──────────────────────────────────────────────────
 export const useSimulatedHosts = (enabled = true) =>
   useQuery({
@@ -457,6 +486,24 @@ export const useBulkApplySimulatedPrice = () => {
   });
 };
 
+// Offer Management sandbox — no Vast write, local only.
+export const useSetSimulatedDefjob = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ hostId, payload }: { hostId: string; payload: DefjobInput }) =>
+      api.put<DefjobConfig>(`/simulator/hosts/${hostId}/defjob`, payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['simulated-hosts'] }),
+  });
+};
+
+export const useRemoveSimulatedDefjob = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (hostId: string) => api.del<DefjobConfig>(`/simulator/hosts/${hostId}/defjob`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['simulated-hosts'] }),
+  });
+};
+
 // Same query as useSimulatedPricingRecommendation, one per host — shares cache
 // entries so the bulk-ops table (Offer Management sandbox) doesn't duplicate
 // requests made by per-host cards using the singular hook.
@@ -518,3 +565,40 @@ export const useEndSimulatedRental = () => {
     },
   });
 };
+
+// ── Alerting ───────────────────────────────────────────────────
+// Global per-user thresholds, applied identically to real machines and
+// simulated rigs — the frontend picks which alert feed to show using the
+// same real/simulated fallback pattern as everywhere else.
+export const useAlertSettings = () =>
+  useQuery({
+    queryKey: ['alert-settings'],
+    queryFn: () => api.get<AlertSettingsConfig>('/alerting/settings'),
+  });
+
+export const useUpdateAlertSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: Omit<AlertSettingsConfig, 'id' | 'updated_at'>) =>
+      api.put<AlertSettingsConfig>('/alerting/settings', payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['alert-settings'] });
+      qc.invalidateQueries({ queryKey: ['machine-alerts'] });
+      qc.invalidateQueries({ queryKey: ['simulated-alerts'] });
+    },
+  });
+};
+
+export const useMachineAlerts = () =>
+  useQuery({
+    queryKey: ['machine-alerts'],
+    queryFn: () => api.get<RigAlert[]>('/alerting/machines'),
+    refetchInterval: 60_000,
+  });
+
+export const useSimulatedAlerts = () =>
+  useQuery({
+    queryKey: ['simulated-alerts'],
+    queryFn: () => api.get<RigAlert[]>('/alerting/simulated'),
+    refetchInterval: 60_000,
+  });

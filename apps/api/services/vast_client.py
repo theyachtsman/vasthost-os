@@ -186,3 +186,31 @@ class VastClient:
             if v is not None:
                 kwargs[k] = v
         return self._call("list_machine", **kwargs)
+
+    # ── Offer Management — default job (backfill) ────────────────
+    def set_defjob(
+        self,
+        machine_id: int,
+        *,
+        price_gpu: float,
+        price_inetu: float,
+        price_inetd: float,
+        image: str,
+        args: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Configure a background job that launches on this machine whenever
+        it isn't rented, at a host-set price — self-renting idle GPU time
+        instead of earning nothing. Matches vastai SDK 1.1.3's set_defjob,
+        which PUTs to /machines/create_bids/."""
+        return self._call(
+            "set_defjob",
+            id=int(machine_id),
+            price_gpu=float(price_gpu),
+            price_inetu=float(price_inetu),
+            price_inetd=float(price_inetd),
+            image=image,
+            args=args or [],
+        )
+
+    def remove_defjob(self, machine_id: int) -> dict[str, Any]:
+        return self._call("remove_defjob", id=int(machine_id))

@@ -7,11 +7,13 @@ from core.config import settings
 
 from .routes import (
     admin,
+    alerting,
     auth,
     earnings,
     fleet,
     health,
     market,
+    offers,
     pricing,
     provider_keys,
     simulator,
@@ -54,6 +56,8 @@ app.include_router(fleet.router, prefix="/fleet", tags=["fleet"])
 app.include_router(earnings.router, prefix="/earnings", tags=["earnings"])
 app.include_router(simulator.router, prefix="/simulator", tags=["simulator"])
 app.include_router(pricing.router, prefix="/pricing", tags=["pricing"])
+app.include_router(offers.router, prefix="/offers", tags=["offers"])
+app.include_router(alerting.router, prefix="/alerting", tags=["alerting"])
 
 # Note: the legacy single-account /account/* routes are removed — the two-key
 # model supersedes them entirely (see /me/provider-keys and /admin/platform-keys).

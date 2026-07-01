@@ -67,6 +67,14 @@ class MachineOut(ORMModel):
     # price change updates current_price_gpu (the asking price) immediately —
     # same as Vast — but this stays fixed until the active rental ends.
     active_locked_price_gpu: float | None = None
+    # Offer Management — Vast's "default job": a background container that
+    # runs on this machine whenever it's idle, at a host-set price.
+    defjob_enabled: bool = False
+    defjob_image: str | None = None
+    defjob_price_gpu: float | None = None
+    defjob_price_inetu: float | None = None
+    defjob_price_inetd: float | None = None
+    defjob_args: str | None = None
 
 
 class ContractOut(ORMModel):
@@ -266,6 +274,9 @@ class SimulatedHostIn(BaseModel):
     # host" rule applies.
     rented_until: datetime | None = None
     locked_price_gpu: float | None = None
+    # Mirrors HostMachine.offer_end_date — lets the Alerting offer-expiry
+    # threshold be tested against a simulated rig.
+    offer_end_date: datetime | None = None
 
 
 class SimulatedHostOut(SimulatedHostIn, ORMModel):
@@ -276,6 +287,33 @@ class SimulatedHostOut(SimulatedHostIn, ORMModel):
     # Computed: rented_until is in the future. Lets the frontend badge "renting
     # now" without redoing the now() comparison itself.
     is_rented: bool = False
+    # Offer Management sandbox — not part of SimulatedHostIn, so a general
+    # config save can never touch it. Set/cleared only via PUT/DELETE .../defjob.
+    defjob_enabled: bool = False
+    defjob_image: str | None = None
+    defjob_price_gpu: float | None = None
+    defjob_price_inetu: float | None = None
+    defjob_price_inetd: float | None = None
+    defjob_args: str | None = None
+
+
+# Offer Management — Vast's "default job" / backfill config. Shared shape for
+# both real machines and simulated rigs.
+class DefjobIn(BaseModel):
+    image: str = Field(min_length=1)
+    price_gpu: float = Field(gt=0)
+    price_inetu: float = Field(ge=0)
+    price_inetd: float = Field(ge=0)
+    args: str | None = None  # raw space-separated string; split before calling Vast
+
+
+class DefjobOut(BaseModel):
+    enabled: bool
+    image: str | None = None
+    price_gpu: float | None = None
+    price_inetu: float | None = None
+    price_inetd: float | None = None
+    args: str | None = None
 
 
 # ── Simulator × live market projection ─────────────────────────
@@ -457,3 +495,34 @@ class WatchedClassOut(ORMModel):
     num_gpus: int
     geolocation: str | None
     is_active: bool
+
+
+# ── Alerting ───────────────────────────────────────────────────
+# Four independently-toggleable alert types, each with its own threshold
+# (offer expiry/idle/rented are duration-based; offline is a plain flag).
+# Scoped globally per user — one row, applies across real machines and
+# simulated rigs alike.
+class AlertSettingsIn(BaseModel):
+    offer_expiry_enabled: bool = True
+    offer_expiry_threshold_hours: int = Field(48, ge=1, le=720)
+    idle_enabled: bool = False
+    idle_threshold_hours: int = Field(4, ge=1, le=720)
+    rented_enabled: bool = False
+    rented_threshold_hours: int = Field(24, ge=1, le=720)
+    offline_enabled: bool = False
+
+
+class AlertSettingsOut(AlertSettingsIn, ORMModel):
+    id: uuid.UUID
+    updated_at: datetime
+
+
+class RigAlertOut(BaseModel):
+    kind: str  # offer_expiry | idle | rented | offline
+    id: str  # machine_id or simulated host_id, as a string
+    label: str
+    gpu_name: str | None
+    num_gpus: int | None
+    simulated: bool
+    detail: str
+    severity: str  # warning | danger

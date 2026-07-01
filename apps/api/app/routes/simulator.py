@@ -12,6 +12,8 @@ from schemas.models import (
     AutopilotStepOut,
     BulkApplyResult,
     BulkApplyResultItem,
+    DefjobIn,
+    DefjobOut,
     PriceChangeEventOut,
     ProjectionPoint,
     SimulateRentalIn,
@@ -309,6 +311,8 @@ def start_simulated_rental(
 
     host.locked_price_gpu = host.current_price_gpu
     host.rented_until = payload.ends_at
+    host.rented_since = datetime.now(UTC)
+    host.idle_since = None
     db.commit()
     db.refresh(host)
     return _to_out(host)
@@ -328,6 +332,8 @@ def end_simulated_rental(
 
     host.rented_until = None
     host.locked_price_gpu = None
+    host.rented_since = None
+    host.idle_since = datetime.now(UTC)
     db.commit()
     db.refresh(host)
     return _to_out(host)
@@ -442,3 +448,63 @@ def bulk_apply_recommended(
         )
 
     return BulkApplyResult(applied=applied, skipped=skipped, failed=failed, items=items)
+
+
+def _sim_defjob_out(host: SimulatedHost) -> DefjobOut:
+    return DefjobOut(
+        enabled=host.defjob_enabled,
+        image=host.defjob_image,
+        price_gpu=float(host.defjob_price_gpu) if host.defjob_price_gpu is not None else None,
+        price_inetu=(
+            float(host.defjob_price_inetu) if host.defjob_price_inetu is not None else None
+        ),
+        price_inetd=(
+            float(host.defjob_price_inetd) if host.defjob_price_inetd is not None else None
+        ),
+        args=host.defjob_args,
+    )
+
+
+@router.put("/hosts/{host_id}/defjob", response_model=DefjobOut)
+def set_simulated_defjob(
+    host_id: uuid.UUID,
+    payload: DefjobIn,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> DefjobOut:
+    """Sandbox counterpart of PUT /offers/machines/{id}/defjob — local only, no
+    Vast write, so you can test backfill config before hosting anything."""
+    host = db.get(SimulatedHost, host_id)
+    if host is None:
+        raise HTTPException(status_code=404, detail="Simulated host not found")
+
+    host.defjob_enabled = True
+    host.defjob_image = payload.image
+    host.defjob_price_gpu = payload.price_gpu
+    host.defjob_price_inetu = payload.price_inetu
+    host.defjob_price_inetd = payload.price_inetd
+    host.defjob_args = payload.args
+    db.commit()
+    db.refresh(host)
+    return _sim_defjob_out(host)
+
+
+@router.delete("/hosts/{host_id}/defjob", response_model=DefjobOut)
+def remove_simulated_defjob(
+    host_id: uuid.UUID,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> DefjobOut:
+    host = db.get(SimulatedHost, host_id)
+    if host is None:
+        raise HTTPException(status_code=404, detail="Simulated host not found")
+
+    host.defjob_enabled = False
+    host.defjob_image = None
+    host.defjob_price_gpu = None
+    host.defjob_price_inetu = None
+    host.defjob_price_inetd = None
+    host.defjob_args = None
+    db.commit()
+    db.refresh(host)
+    return _sim_defjob_out(host)

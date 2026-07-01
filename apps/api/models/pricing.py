@@ -22,8 +22,11 @@ class PriceChangeEvent(Base):
     machine_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("host_machines.id")
     )
+    # CASCADE: sandbox history has no audit requirement past the rig's own
+    # lifetime, so deleting a simulated rig cleans up its price history too
+    # (unlike machine_id above, which stays RESTRICT — a real audit trail).
     simulated_host_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("simulated_hosts.id")
+        UUID(as_uuid=True), ForeignKey("simulated_hosts.id", ondelete="CASCADE")
     )
     old_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
     new_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))

@@ -46,6 +46,30 @@ class SimulatedHost(Base):
     # Set together via POST .../simulate-rental, cleared via .../end-rental.
     rented_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     locked_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    # When the current simulated rental began — lets Alerting compute "rented
+    # for N hours" the same way it does for a real RentalContract.rented_at.
+    # Set on .../simulate-rental, cleared on .../end-rental.
+    rented_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When this rig last went idle (explicit .../end-rental only — a natural
+    # rented_until expiry is detected lazily by comparing to now(), same as
+    # is_rented). Lets Alerting compute "idle for N hours" without a background
+    # job to close out expired rentals. Mirrors a real machine's idle-since,
+    # which is derived from RentalContract.ended_at instead.
+    idle_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Mirrors HostMachine.offer_end_date — lets the offer-expiry alert be
+    # tested against a simulated rig. Editable via the general config form.
+    offer_end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Sandbox counterpart of Vast's "default job" (see models.fleet.HostMachine)
+    # — local only, no Vast write. Set/cleared via PUT/DELETE .../defjob, not
+    # part of SimulatedHostIn so a general config save can never touch it.
+    defjob_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    defjob_image: Mapped[str | None] = mapped_column(String)
+    defjob_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    defjob_price_inetu: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    defjob_price_inetd: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    defjob_args: Mapped[str | None] = mapped_column(String)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # Distinguishes sandbox rigs from real per-user machines once they land via
     # user_provider_keys. Fleet surfaces must never blend the two silently.
