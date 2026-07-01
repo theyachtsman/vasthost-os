@@ -395,6 +395,7 @@ function SimRecoCard({ host }: { host: SimulatedHost }) {
               {reco.gpu_name ?? host.name ?? 'Rig'} ×{reco.num_gpus ?? '?'}
             </span>
             <Badge variant="accent">SIMULATED</Badge>
+            {host.autopilot_enabled ? <Badge variant="accent">AUTOPILOT</Badge> : null}
             {reco.demand_label ? (
               <span className={'text-[11px] font-medium ' + demandColor(reco.demand_label)}>
                 {reco.demand_label}
@@ -402,6 +403,13 @@ function SimRecoCard({ host }: { host: SimulatedHost }) {
             ) : null}
           </div>
           <p className="mt-0.5 max-w-2xl text-[11px] text-muted">{reco.rationale}</p>
+          {host.autopilot_enabled ? (
+            <p className="mt-0.5 text-[11px] text-accent">
+              Autopilot is managing this rig&rsquo;s price automatically (~every 15 min, bounded
+              by its rails in Simulator). Manual apply below still works — the next automated
+              step continues from wherever you leave it.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-4">

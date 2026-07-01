@@ -30,6 +30,14 @@ class SimulatedHost(Base):
     # Sandbox "asking price" — set via the Pricing Control apply-price route (local
     # only, no Vast write). Null until the user applies a recommendation or sets one.
     current_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    # Phase 2 — bounded auto-repricing. Off by default: a rig only gets
+    # automated step-down/probe-up moves once the user opts in. The rails are
+    # user-set; the controller (services/autopilot.py) never moves outside them.
+    autopilot_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    min_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    max_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # Distinguishes sandbox rigs from real per-user machines once they land via
     # user_provider_keys. Fleet surfaces must never blend the two silently.

@@ -1,13 +1,15 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.config import settings
 from db.session import get_db
-from models import MarketDistribution, SimulatedHost, User
+from models import MarketDistribution, PriceChangeEvent, SimulatedHost, User
 from schemas.models import (
+    AutopilotStepOut,
+    PriceChangeEventOut,
     ProjectionPoint,
     SimulatedHostIn,
     SimulatedHostMarketContext,
@@ -15,6 +17,7 @@ from schemas.models import (
     SimulatedPriceApplyIn,
     SimulatedPricingRecommendation,
 )
+from services import autopilot as autopilot_svc
 from services import pricing as pricing_svc
 from services.calc import break_even_floor_per_gpu_hour, percentile_position
 
@@ -258,7 +261,67 @@ def apply_price(
             ),
         )
 
+    old_price = reco.current_price_gpu
     host.current_price_gpu = payload.new_price_gpu
+    db.add(
+        PriceChangeEvent(
+            simulated_host_id=host.id,
+            old_price_gpu=old_price,
+            new_price_gpu=payload.new_price_gpu,
+            reason="recommend_applied",
+            market_dist_id=reco.market_dist_id,
+            market_percentile=reco.current_percentile,
+            applied_to_vast=False,
+        )
+    )
     db.commit()
     db.refresh(host)
     return pricing_svc.recommend_for_simulated_host(db, host)
+
+
+@router.post("/hosts/{host_id}/autopilot-step", response_model=AutopilotStepOut)
+def autopilot_step_now(
+    host_id: uuid.UUID,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> AutopilotStepOut:
+    """Phase 2 — manually trigger one autopilot evaluation now, so a user can see
+    the controller work without waiting for the next scheduled tick (every 15
+    min, see worker.tasks.autopilot_tick). Same eligibility and rails as the
+    scheduled tick: the rig must have autopilot enabled."""
+    host = db.get(SimulatedHost, host_id)
+    if host is None:
+        raise HTTPException(status_code=404, detail="Simulated host not found")
+    if not host.autopilot_enabled:
+        raise HTTPException(status_code=400, detail="Autopilot is not enabled for this rig.")
+
+    event = autopilot_svc.autopilot_step(db, host)
+    reco = pricing_svc.recommend_for_simulated_host(db, host)
+    return AutopilotStepOut(
+        moved=event is not None,
+        reason=event.reason if event is not None else None,
+        old_price_gpu=event.old_price_gpu if event is not None else reco.current_price_gpu,
+        new_price_gpu=event.new_price_gpu if event is not None else reco.current_price_gpu,
+        recommendation=reco,
+    )
+
+
+@router.get("/hosts/{host_id}/price-history", response_model=list[PriceChangeEventOut])
+def price_history(
+    host_id: uuid.UUID,
+    limit: int = Query(20, ge=1, le=200),
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> list[PriceChangeEventOut]:
+    """Manual applies and autopilot moves for one simulated rig — the sandbox
+    counterpart of GET /pricing/history."""
+    host = db.get(SimulatedHost, host_id)
+    if host is None:
+        raise HTTPException(status_code=404, detail="Simulated host not found")
+    rows = db.scalars(
+        select(PriceChangeEvent)
+        .where(PriceChangeEvent.simulated_host_id == host.id)
+        .order_by(PriceChangeEvent.changed_at.desc())
+        .limit(limit)
+    )
+    return [PriceChangeEventOut.model_validate(r) for r in rows]

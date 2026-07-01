@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from db.session import SessionLocal
 from models import HostMachine, UserProviderKey
+from services import autopilot as autopilot_svc
 from services import observer as observer_svc
 from services import sync as sync_svc
 
@@ -65,6 +66,18 @@ def market_distribution_aggregate() -> int:
     db = SessionLocal()
     try:
         return observer_svc.market_distribution_aggregate(db)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="worker.tasks.autopilot_tick")
+def autopilot_tick() -> int:
+    """Phase 2 — bounded auto-repricing for simulated hosts with autopilot
+    enabled. Reads the market_distributions rows market_distribution_aggregate
+    just refreshed, so this runs right after it on the same cadence."""
+    db = SessionLocal()
+    try:
+        return autopilot_svc.run_all(db)
     finally:
         db.close()
 

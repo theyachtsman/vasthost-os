@@ -13,9 +13,11 @@ import { dph, num, pct, relativeTime, usd } from '@/lib/format';
 import {
   useDeleteSimulatedHost,
   useMarketMeta,
+  useRunAutopilotStep,
   useSaveSimulatedHost,
   useSimulatedHostMarket,
   useSimulatedHosts,
+  useSimulatedPriceHistory,
 } from '@/lib/hooks';
 
 type Draft = {
@@ -32,6 +34,9 @@ type Draft = {
   vast_service_fee_pct: number;
   // Raw text, not a number — blank means "unset" (distinct from 0).
   current_price_gpu: string;
+  autopilot_enabled: boolean;
+  min_price_gpu: string;
+  max_price_gpu: string;
 };
 
 const EMPTY: Draft = {
@@ -48,6 +53,9 @@ const EMPTY: Draft = {
   // /market/meta loads, unless the user overrides it.
   vast_service_fee_pct: 0.25,
   current_price_gpu: '',
+  autopilot_enabled: false,
+  min_price_gpu: '',
+  max_price_gpu: '',
 };
 
 function draftFromHost(host: SimulatedHost): Draft {
@@ -64,6 +72,9 @@ function draftFromHost(host: SimulatedHost): Draft {
     kwh_rate: host.kwh_rate ?? 0,
     vast_service_fee_pct: host.vast_service_fee_pct,
     current_price_gpu: host.current_price_gpu != null ? String(host.current_price_gpu) : '',
+    autopilot_enabled: host.autopilot_enabled,
+    min_price_gpu: host.min_price_gpu != null ? String(host.min_price_gpu) : '',
+    max_price_gpu: host.max_price_gpu != null ? String(host.max_price_gpu) : '',
   };
 }
 
@@ -107,8 +118,13 @@ export default function SimulatorPage() {
     setDraft(EMPTY);
   };
 
+  const setAutopilotEnabled = (e: React.ChangeEvent<HTMLInputElement>) =>
+    setDraft((d) => ({ ...d, autopilot_enabled: e.target.checked }));
+
   const submit = () => {
     const priceRaw = draft.current_price_gpu.trim();
+    const minRaw = draft.min_price_gpu.trim();
+    const maxRaw = draft.max_price_gpu.trim();
     save.mutate(
       {
         id: draft.id,
@@ -123,6 +139,9 @@ export default function SimulatorPage() {
         kwh_rate: draft.kwh_rate,
         vast_service_fee_pct: draft.vast_service_fee_pct,
         current_price_gpu: priceRaw === '' ? null : Number(priceRaw),
+        autopilot_enabled: draft.autopilot_enabled,
+        min_price_gpu: minRaw === '' ? null : Number(minRaw),
+        max_price_gpu: maxRaw === '' ? null : Number(maxRaw),
       },
       {
         onSuccess: () => {
@@ -182,6 +201,43 @@ export default function SimulatorPage() {
             </Field>
           </div>
 
+          <div className="mt-3 rounded-md border border-border bg-bg/40 p-3">
+            <label className="flex items-center gap-2 text-sm text-fg">
+              <input
+                type="checkbox"
+                checked={draft.autopilot_enabled}
+                onChange={setAutopilotEnabled}
+                className="accent-accent"
+              />
+              Autopilot — bounded auto-repricing
+            </label>
+            <p className="mt-1 text-[11px] text-muted">
+              Every ~15 min, steps the price down when demand is soft/cold or up when it&rsquo;s
+              hot (holds on warm/ambiguous signal). Never moves outside the rails below, and
+              never below break-even.
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <Field label="Min price ($/GPU·hr)">
+                <Input
+                  type="number"
+                  step="0.001"
+                  placeholder="floor = break-even"
+                  value={draft.min_price_gpu}
+                  onChange={set('min_price_gpu')}
+                />
+              </Field>
+              <Field label="Max price ($/GPU·hr)">
+                <Input
+                  type="number"
+                  step="0.001"
+                  placeholder="no ceiling"
+                  value={draft.max_price_gpu}
+                  onChange={set('max_price_gpu')}
+                />
+              </Field>
+            </div>
+          </div>
+
           <div className="mt-4 flex items-center justify-between rounded-md border border-border bg-bg/40 p-3">
             <div>
               <div className="text-[10px] uppercase text-muted">Est. break-even floor</div>
@@ -226,9 +282,19 @@ export default function SimulatorPage() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-fg">{h.name ?? h.gpu_name}</span>
                           <Badge variant="muted">{h.verified}</Badge>
+                          {h.autopilot_enabled ? (
+                            <Badge variant="accent">AUTOPILOT</Badge>
+                          ) : null}
                         </div>
                         <div className="text-xs text-muted">
                           {h.gpu_name} ×{h.num_gpus} · {h.gpu_max_power_w ?? '?'}W · ${h.kwh_rate}/kWh
+                          {h.autopilot_enabled ? (
+                            <>
+                              {' '}
+                              · rails {h.min_price_gpu != null ? dph(h.min_price_gpu) : dph(h.break_even_floor)}
+                              –{h.max_price_gpu != null ? dph(h.max_price_gpu) : 'no ceiling'}
+                            </>
+                          ) : null}
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
@@ -249,6 +315,7 @@ export default function SimulatorPage() {
                             {dph(h.break_even_floor)}
                           </div>
                         </div>
+                        {h.autopilot_enabled ? <RunAutopilotStepButton host={h} /> : null}
                         <Button
                           size="icon"
                           variant="ghost"
@@ -275,6 +342,7 @@ export default function SimulatorPage() {
                       </div>
                     </CardContent>
                     <SimMarketPanel host={h} />
+                    <AutopilotHistory host={h} />
                   </Card>
                 ))}
               </div>
@@ -406,6 +474,58 @@ function SimMarketPanel({ host }: { host: SimulatedHost }) {
           </table>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function RunAutopilotStepButton({ host }: { host: SimulatedHost }) {
+  const run = useRunAutopilotStep();
+  return (
+    <Button
+      size="sm"
+      variant="secondary"
+      disabled={run.isPending}
+      onClick={() =>
+        run.mutate(host.id, {
+          onSuccess: (result) => {
+            if (result.moved) {
+              const label = result.reason?.replace('auto_', '').replaceAll('_', ' ') ?? 'moved';
+              toast.success(`${label} → ${dph(result.new_price_gpu)}`);
+            } else {
+              toast('No move — demand is holding (Warm) or already at a rail.');
+            }
+          },
+          onError: (err) =>
+            toast.error(err instanceof Error ? err.message : 'Autopilot step failed'),
+        })
+      }
+    >
+      {run.isPending ? 'Running…' : 'Run step now'}
+    </Button>
+  );
+}
+
+function AutopilotHistory({ host }: { host: SimulatedHost }) {
+  const history = useSimulatedPriceHistory(host.id);
+  const rows = (history.data ?? []).slice(0, 5);
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-1 border-t border-border bg-bg/20 px-3 py-2">
+      <span className="text-[10px] font-medium uppercase tracking-wide text-muted">
+        Recent price changes
+      </span>
+      {rows.map((e) => (
+        <div key={e.id} className="flex items-center gap-2 text-[11px]">
+          <Badge variant={e.reason?.startsWith('auto') ? 'accent' : 'muted'}>
+            {e.reason?.replace('auto_', '').replaceAll('_', ' ') ?? 'change'}
+          </Badge>
+          <span className="tabular-nums text-muted">
+            {dph(e.old_price_gpu)} → {dph(e.new_price_gpu)}
+          </span>
+          <span className="text-muted">· {relativeTime(e.changed_at)}</span>
+        </div>
+      ))}
     </div>
   );
 }

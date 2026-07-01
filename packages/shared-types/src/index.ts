@@ -209,6 +209,9 @@ export interface SimulatedHost {
   created_at: string;
   break_even_floor: number | null;
   current_price_gpu: number | null;
+  autopilot_enabled: boolean;
+  min_price_gpu: number | null;
+  max_price_gpu: number | null;
 }
 
 export interface WatchedClass {
@@ -320,7 +323,8 @@ export interface SimulatedPricingRecommendation {
 export interface PriceChangeEvent {
   id: string;
   changed_at: string;
-  machine_id: string;
+  machine_id: string | null;
+  simulated_host_id: string | null;
   old_price_gpu: number | null;
   new_price_gpu: number | null;
   reason: string | null;
@@ -328,6 +332,15 @@ export interface PriceChangeEvent {
   applied_to_vast: boolean;
   applied_at: string | null;
   error_message: string | null;
+}
+
+// Phase 2 — result of one autopilot evaluation (scheduled or manually triggered).
+export interface AutopilotStepResult {
+  moved: boolean;
+  reason: string | null;
+  old_price_gpu: number | null;
+  new_price_gpu: number | null;
+  recommendation: SimulatedPricingRecommendation;
 }
 
 export interface ProjectionPoint {

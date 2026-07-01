@@ -44,6 +44,10 @@ celery_app.conf.beat_schedule = {
         "task": "worker.tasks.market_distribution_aggregate",
         "schedule": 900.0,  # every 15 minutes
     },
+    "autopilot-tick": {
+        "task": "worker.tasks.autopilot_tick",
+        "schedule": 900.0,  # every 15 min — same cadence as the distribution refresh it reads
+    },
     "observer-discover": {
         "task": "worker.tasks.observer_discover",
         "schedule": 1800.0,  # every 30 minutes — auto-maintain watched classes

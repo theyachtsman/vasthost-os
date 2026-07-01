@@ -1,6 +1,7 @@
 import {
   type AdminObserverStatus,
   type AdminOut,
+  type AutopilotStepResult,
   type AvailableClass,
   type ClearingEvent,
   type DailyEarningPoint,
@@ -424,6 +425,28 @@ export const useApplySimulatedPrice = () => {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['sim-pricing-recommendation', vars.hostId] });
       qc.invalidateQueries({ queryKey: ['simulated-hosts'] });
+      qc.invalidateQueries({ queryKey: ['sim-price-history', vars.hostId] });
+    },
+  });
+};
+
+// Phase 2 — bounded auto-repricing.
+export const useSimulatedPriceHistory = (hostId: string | null) =>
+  useQuery({
+    queryKey: ['sim-price-history', hostId],
+    queryFn: () => api.get<PriceChangeEvent[]>(`/simulator/hosts/${hostId}/price-history`),
+    enabled: !!hostId,
+  });
+
+export const useRunAutopilotStep = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (hostId: string) =>
+      api.post<AutopilotStepResult>(`/simulator/hosts/${hostId}/autopilot-step`),
+    onSuccess: (_data, hostId) => {
+      qc.invalidateQueries({ queryKey: ['sim-pricing-recommendation', hostId] });
+      qc.invalidateQueries({ queryKey: ['simulated-hosts'] });
+      qc.invalidateQueries({ queryKey: ['sim-price-history', hostId] });
     },
   });
 };

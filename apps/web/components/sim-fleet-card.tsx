@@ -30,7 +30,10 @@ export function SimFleetCard({ host }: { host: SimulatedHost }) {
               {gb(host.gpu_ram_mb)} · {host.geolocation ?? 'any region'}
             </div>
           </div>
-          <Badge variant="accent">SIMULATED</Badge>
+          <div className="flex items-center gap-1">
+            {host.autopilot_enabled ? <Badge variant="accent">AUTOPILOT</Badge> : null}
+            <Badge variant="accent">SIMULATED</Badge>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

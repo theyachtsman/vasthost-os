@@ -250,6 +250,12 @@ class SimulatedHostIn(BaseModel):
     # Editing/saving a config round-trips whatever value is currently loaded, so
     # neither path clobbers the other as long as callers spread the fetched host.
     current_price_gpu: float | None = None
+    # Phase 2 — bounded auto-repricing, opt-in per rig. The controller never
+    # moves the price outside [min_price_gpu, max_price_gpu] (nor below the
+    # break-even floor, which always wins if it's the tighter bound).
+    autopilot_enabled: bool = False
+    min_price_gpu: float | None = None
+    max_price_gpu: float | None = None
 
 
 class SimulatedHostOut(SimulatedHostIn, ORMModel):
@@ -341,6 +347,15 @@ class SimulatedPriceApplyIn(BaseModel):
     new_price_gpu: float = Field(gt=0)
 
 
+# Phase 2 — result of one autopilot evaluation (scheduled or manually triggered).
+class AutopilotStepOut(BaseModel):
+    moved: bool
+    reason: str | None = None  # auto_step_down | auto_probe_up | auto_seed | None (no move)
+    old_price_gpu: float | None
+    new_price_gpu: float | None
+    recommendation: SimulatedPricingRecommendation
+
+
 class PriceApplyIn(BaseModel):
     machine_id: uuid.UUID
     new_price_gpu: float = Field(gt=0)
@@ -350,7 +365,8 @@ class PriceApplyIn(BaseModel):
 class PriceChangeEventOut(ORMModel):
     id: uuid.UUID
     changed_at: datetime
-    machine_id: uuid.UUID
+    machine_id: uuid.UUID | None
+    simulated_host_id: uuid.UUID | None = None
     old_price_gpu: float | None
     new_price_gpu: float | None
     reason: str | None
