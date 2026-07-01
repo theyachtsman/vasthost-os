@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -9,8 +10,12 @@ from db.session import get_db
 from models import MarketDistribution, PriceChangeEvent, SimulatedHost, User
 from schemas.models import (
     AutopilotStepOut,
+    BulkApplyResult,
+    BulkApplyResultItem,
     PriceChangeEventOut,
     ProjectionPoint,
+    SimulateRentalIn,
+    SimulatedBulkApplyIn,
     SimulatedHostIn,
     SimulatedHostMarketContext,
     SimulatedHostOut,
@@ -36,6 +41,7 @@ def _to_out(host: SimulatedHost) -> SimulatedHostOut:
         if host.vast_service_fee_pct is not None
         else settings.MARKET_FEE_PCT,
     )
+    out.is_rented = host.rented_until is not None and host.rented_until > datetime.now(UTC)
     return out
 
 
@@ -279,6 +285,54 @@ def apply_price(
     return pricing_svc.recommend_for_simulated_host(db, host)
 
 
+@router.post("/hosts/{host_id}/simulate-rental", response_model=SimulatedHostOut)
+def start_simulated_rental(
+    host_id: uuid.UUID,
+    payload: SimulateRentalIn,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> SimulatedHostOut:
+    """Mark this rig as currently rented, locking in its current asking price —
+    the sandbox counterpart of a real RentalContract. Exists so a user can test
+    Vast's real rule: a price change always updates the asking price
+    immediately, but never retroactively changes an active rental's rate."""
+    host = db.get(SimulatedHost, host_id)
+    if host is None:
+        raise HTTPException(status_code=404, detail="Simulated host not found")
+    if host.current_price_gpu is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Set an asking price before simulating a rental — there's nothing to lock in.",
+        )
+    if payload.ends_at <= datetime.now(UTC):
+        raise HTTPException(status_code=400, detail="ends_at must be in the future.")
+
+    host.locked_price_gpu = host.current_price_gpu
+    host.rented_until = payload.ends_at
+    db.commit()
+    db.refresh(host)
+    return _to_out(host)
+
+
+@router.post("/hosts/{host_id}/end-rental", response_model=SimulatedHostOut)
+def end_simulated_rental(
+    host_id: uuid.UUID,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> SimulatedHostOut:
+    """End the simulated rental early (or clear a stale one) — the rig goes
+    back to idle, and price changes have nothing to wait on."""
+    host = db.get(SimulatedHost, host_id)
+    if host is None:
+        raise HTTPException(status_code=404, detail="Simulated host not found")
+
+    host.rented_until = None
+    host.locked_price_gpu = None
+    db.commit()
+    db.refresh(host)
+    return _to_out(host)
+
+
 @router.post("/hosts/{host_id}/autopilot-step", response_model=AutopilotStepOut)
 def autopilot_step_now(
     host_id: uuid.UUID,
@@ -325,3 +379,66 @@ def price_history(
         .limit(limit)
     )
     return [PriceChangeEventOut.model_validate(r) for r in rows]
+
+
+@router.post("/hosts/bulk-apply-recommended", response_model=BulkApplyResult)
+def bulk_apply_recommended(
+    payload: SimulatedBulkApplyIn,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> BulkApplyResult:
+    """Sandbox counterpart of POST /pricing/bulk-apply — applies each selected
+    rig's own current recommended price. No Vast write, no break-even-floor
+    failures possible (the recommendation already respects it), so this is
+    mainly useful for testing the bulk-ops UI before it matters for real."""
+    items: list[BulkApplyResultItem] = []
+    applied = skipped = failed = 0
+
+    for host_id in payload.host_ids:
+        host = db.get(SimulatedHost, host_id)
+        if host is None:
+            items.append(
+                BulkApplyResultItem(
+                    id=host_id, label="unknown rig", status="failed",
+                    old_price_gpu=None, new_price_gpu=None, detail="Simulated host not found",
+                )
+            )
+            failed += 1
+            continue
+
+        label = f"{host.gpu_name or 'GPU'} ×{host.num_gpus or '?'} · {host.name or 'sim rig'}"
+        reco = pricing_svc.recommend_for_simulated_host(db, host)
+        if not reco.has_market_data or reco.recommended_price_gpu is None:
+            items.append(
+                BulkApplyResultItem(
+                    id=host_id, label=label, status="skipped_no_market",
+                    old_price_gpu=reco.current_price_gpu, new_price_gpu=None,
+                    detail="No market data yet for this GPU class.",
+                )
+            )
+            skipped += 1
+            continue
+
+        old_price = reco.current_price_gpu
+        host.current_price_gpu = reco.recommended_price_gpu
+        db.add(
+            PriceChangeEvent(
+                simulated_host_id=host.id,
+                old_price_gpu=old_price,
+                new_price_gpu=reco.recommended_price_gpu,
+                reason="bulk_recommend_applied",
+                market_dist_id=reco.market_dist_id,
+                market_percentile=reco.current_percentile,
+                applied_to_vast=False,
+            )
+        )
+        db.commit()
+        applied += 1
+        items.append(
+            BulkApplyResultItem(
+                id=host_id, label=label, status="applied",
+                old_price_gpu=old_price, new_price_gpu=reco.recommended_price_gpu, detail=None,
+            )
+        )
+
+    return BulkApplyResult(applied=applied, skipped=skipped, failed=failed, items=items)

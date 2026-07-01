@@ -9,6 +9,7 @@ Nothing is written without an explicit per-machine apply.
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,7 +19,14 @@ from sqlalchemy.orm import Session
 from core.crypto import decrypt
 from db.session import get_db
 from models import CostConfig, HostMachine, PriceChangeEvent, User, UserProviderKey
-from schemas.models import PriceApplyIn, PriceChangeEventOut, PricingRecommendation
+from schemas.models import (
+    BulkApplyIn,
+    BulkApplyResult,
+    BulkApplyResultItem,
+    PriceApplyIn,
+    PriceChangeEventOut,
+    PricingRecommendation,
+)
 from services import pricing as pricing_svc
 from services.provider_keys import audit
 from services.vast_client import VastClient, VastClientError
@@ -69,55 +77,50 @@ def history(
     return [PriceChangeEventOut.model_validate(r) for r in rows]
 
 
-@router.post("/apply", response_model=PriceChangeEventOut)
-def apply(
-    payload: PriceApplyIn,
-    user: User = Depends(require_user_session),
-    db: Session = Depends(get_db),
-) -> PriceChangeEventOut:
-    machine = _owned_machine(db, user, payload.machine_id)
+@dataclass
+class _ApplyResult:
+    status: str  # applied | skipped_floor | failed
+    event: PriceChangeEvent | None
+    detail: str | None
+    http_status: int | None = None
 
-    # Re-derive the market context + break-even floor server-side; never trust the
-    # client's number. Enforce the floor as a hard minimum.
+
+def _apply_price_to_machine(
+    db: Session, user: User, machine: HostMachine, new_price_gpu: float, reason: str
+) -> _ApplyResult:
+    """The single-machine apply, extracted so /apply and /bulk-apply share one
+    code path — every write is still re-validated against the break-even floor
+    server-side, still a read-modify-write to Vast, still audited. Never
+    raises: callers decide how to surface a non-'applied' status (the single
+    route turns it into an HTTPException; bulk-apply just records it and moves
+    on to the next machine)."""
     cost = db.scalar(select(CostConfig).where(CostConfig.machine_id == machine.id))
     reco = pricing_svc.recommend_for_machine(db, machine, cost)
-    if reco.break_even_floor is not None and payload.new_price_gpu < reco.break_even_floor:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Price ${payload.new_price_gpu:.4f} is below your break-even floor "
-                f"${reco.break_even_floor:.4f}/GPU·hr."
-            ),
+    if reco.break_even_floor is not None and new_price_gpu < reco.break_even_floor:
+        return _ApplyResult(
+            "skipped_floor",
+            None,
+            f"Price ${new_price_gpu:.4f} is below your break-even floor "
+            f"${reco.break_even_floor:.4f}/GPU·hr.",
+            http_status=400,
         )
 
     key = db.get(UserProviderKey, machine.user_provider_key_id) if machine.user_provider_key_id else None
     if key is None or not key.is_active or key.user_id != user.id:
-        raise HTTPException(status_code=409, detail="No active key owns this machine.")
+        return _ApplyResult("failed", None, "No active key owns this machine.", http_status=409)
 
     old_price = float(machine.current_price_gpu) if machine.current_price_gpu is not None else None
     now = datetime.now(UTC)
-    event = PriceChangeEvent(
-        machine_id=machine.id,
-        old_price_gpu=old_price,
-        new_price_gpu=payload.new_price_gpu,
-        reason=payload.reason,
-        market_dist_id=reco.market_dist_id,
-        market_percentile=reco.current_percentile,
-        applied_to_vast=False,
-    )
-    db.add(event)
 
     try:
         client = VastClient(decrypt(key.encrypted_api_key))
-        client.set_machine_price(machine.machine_id, payload.new_price_gpu)
+        client.set_machine_price(machine.machine_id, new_price_gpu)
     except Exception as exc:  # noqa: BLE001 — record every failure, then surface it
-        db.rollback()
-        # Re-add the event on a fresh transaction so the failure is auditable.
         event = PriceChangeEvent(
             machine_id=machine.id,
             old_price_gpu=old_price,
-            new_price_gpu=payload.new_price_gpu,
-            reason=payload.reason,
+            new_price_gpu=new_price_gpu,
+            reason=reason,
             market_dist_id=reco.market_dist_id,
             market_percentile=reco.current_percentile,
             applied_to_vast=False,
@@ -129,23 +132,105 @@ def apply(
         audit(db, user_id=user.id, provider=key.provider, action="price_write",
               success=False, error_message=str(exc)[:300])
         if _looks_like_scope_failure(exc) or isinstance(exc, VastClientError):
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "Vast rejected the price write — your key likely lacks the "
-                    "machine-write/pricing scope. Reconnect it in Settings with that "
-                    "permission granted."
-                ),
-            ) from None
-        raise HTTPException(status_code=502, detail="Price write to Vast failed.") from None
+            return _ApplyResult(
+                "failed", event,
+                "Vast rejected the price write — your key likely lacks the "
+                "machine-write/pricing scope. Reconnect it in Settings with that "
+                "permission granted.",
+                http_status=403,
+            )
+        return _ApplyResult("failed", event, "Price write to Vast failed.", http_status=502)
 
-    event.applied_to_vast = True
-    event.applied_at = now
-    machine.current_price_gpu = payload.new_price_gpu
+    event = PriceChangeEvent(
+        machine_id=machine.id,
+        old_price_gpu=old_price,
+        new_price_gpu=new_price_gpu,
+        reason=reason,
+        market_dist_id=reco.market_dist_id,
+        market_percentile=reco.current_percentile,
+        applied_to_vast=True,
+        applied_at=now,
+    )
+    db.add(event)
+    machine.current_price_gpu = new_price_gpu
     db.commit()
     db.refresh(event)
     audit(db, user_id=user.id, provider=key.provider, action="price_write", success=True)
-    return PriceChangeEventOut.model_validate(event)
+    return _ApplyResult("applied", event, None)
+
+
+@router.post("/apply", response_model=PriceChangeEventOut)
+def apply(
+    payload: PriceApplyIn,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> PriceChangeEventOut:
+    machine = _owned_machine(db, user, payload.machine_id)
+    result = _apply_price_to_machine(db, user, machine, payload.new_price_gpu, payload.reason)
+    if result.status != "applied":
+        raise HTTPException(status_code=result.http_status, detail=result.detail)
+    return PriceChangeEventOut.model_validate(result.event)
+
+
+@router.post("/bulk-apply", response_model=BulkApplyResult)
+def bulk_apply(
+    payload: BulkApplyIn,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> BulkApplyResult:
+    """Apply each selected machine's own current recommended price in one pass
+    — the same recommendation Pricing Control shows for that machine, same
+    safety rails (break-even floor, key ownership), just batched. One
+    machine's failure never blocks the rest."""
+    key_ids = _user_key_ids(db, user)
+    items: list[BulkApplyResultItem] = []
+    applied = skipped = failed = 0
+
+    for machine_id in payload.machine_ids:
+        machine = db.get(HostMachine, machine_id)
+        if machine is None or machine.user_provider_key_id not in key_ids:
+            items.append(
+                BulkApplyResultItem(
+                    id=machine_id, label="unknown machine", status="failed",
+                    old_price_gpu=None, new_price_gpu=None, detail="Machine not found",
+                )
+            )
+            failed += 1
+            continue
+
+        label = f"{machine.gpu_name or 'GPU'} ×{machine.num_gpus or '?'} · machine {machine.machine_id}"
+        cost = db.scalar(select(CostConfig).where(CostConfig.machine_id == machine.id))
+        reco = pricing_svc.recommend_for_machine(db, machine, cost)
+        if not reco.has_market_data or reco.recommended_price_gpu is None:
+            items.append(
+                BulkApplyResultItem(
+                    id=machine_id, label=label, status="skipped_no_market",
+                    old_price_gpu=reco.current_price_gpu, new_price_gpu=None,
+                    detail="No market data yet for this GPU class.",
+                )
+            )
+            skipped += 1
+            continue
+
+        result = _apply_price_to_machine(
+            db, user, machine, reco.recommended_price_gpu, "bulk_recommend_applied"
+        )
+        if result.status == "applied":
+            applied += 1
+        elif result.status == "skipped_floor":
+            skipped += 1
+        else:
+            failed += 1
+        items.append(
+            BulkApplyResultItem(
+                id=machine_id, label=label, status=result.status,
+                old_price_gpu=reco.current_price_gpu,
+                new_price_gpu=reco.recommended_price_gpu if result.status == "applied" else None,
+                detail=result.detail,
+            )
+        )
+
+    return BulkApplyResult(applied=applied, skipped=skipped, failed=failed, items=items)
 
 
 def _owned_machine(db: Session, user: User, machine_id: uuid.UUID) -> HostMachine:

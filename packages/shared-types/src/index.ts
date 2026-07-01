@@ -91,6 +91,10 @@ export interface Machine {
   min_bid_price: number | null;
   offer_end_date: string | null;
   last_seen_at: string | null;
+  // Locked price of the active rental contract, if any. A price change
+  // updates current_price_gpu (asking) immediately, same as Vast, but this
+  // stays fixed until the active rental ends.
+  active_locked_price_gpu: number | null;
 }
 
 export interface Contract {
@@ -212,6 +216,12 @@ export interface SimulatedHost {
   autopilot_enabled: boolean;
   min_price_gpu: number | null;
   max_price_gpu: number | null;
+  // Mirrors a real RentalContract — set together via POST .../simulate-rental,
+  // cleared via .../end-rental. A price change updates current_price_gpu
+  // immediately (same as Vast); locked_price_gpu stays fixed until rented_until.
+  rented_until: string | null;
+  locked_price_gpu: number | null;
+  is_rented: boolean;
 }
 
 export interface WatchedClass {
@@ -295,6 +305,11 @@ export interface PricingRecommendation {
   has_market_data: boolean;
   has_power_cost: boolean;
   rationale: string;
+  // A price change updates current_price_gpu (asking) immediately, same as
+  // Vast, but if is_rented, locked_price_gpu is what the active rental is
+  // actually paying and won't change until it ends.
+  is_rented: boolean;
+  locked_price_gpu: number | null;
 }
 
 // Simulated-rig counterpart of PricingRecommendation — same demand-adaptive
@@ -318,6 +333,26 @@ export interface SimulatedPricingRecommendation {
   has_market_data: boolean;
   has_power_cost: boolean;
   rationale: string;
+  is_rented: boolean;
+  locked_price_gpu: number | null;
+}
+
+// Offer Management — bulk price ops. Shared shape for real machines and
+// simulated rigs (POST /pricing/bulk-apply, POST /simulator/hosts/bulk-apply-recommended).
+export interface BulkApplyResultItem {
+  id: string;
+  label: string;
+  status: 'applied' | 'skipped_floor' | 'skipped_no_market' | 'failed';
+  old_price_gpu: number | null;
+  new_price_gpu: number | null;
+  detail: string | null;
+}
+
+export interface BulkApplyResult {
+  applied: number;
+  skipped: number;
+  failed: number;
+  items: BulkApplyResultItem[];
 }
 
 export interface PriceChangeEvent {

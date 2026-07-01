@@ -12,13 +12,13 @@ Pure logic — no Vast IO here; the write path lives in VastClient.set_machine_p
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.config import settings
-from models import CostConfig, HostMachine, MarketDistribution, SimulatedHost
+from models import CostConfig, HostMachine, MarketDistribution, RentalContract, SimulatedHost
 from schemas.models import PricingRecommendation, SimulatedPricingRecommendation
 
 from .calc import break_even_floor_per_gpu_hour
@@ -230,12 +230,24 @@ def recommend_for_machine(
         kwh_rate=kwh,
         fee_pct=settings.MARKET_FEE_PCT,
     )
+    active = db.scalar(
+        select(RentalContract)
+        .where(RentalContract.machine_id == machine.id, RentalContract.status == "active")
+        .order_by(RentalContract.rented_at.desc())
+    )
+    locked = (
+        float(active.locked_price_gpu)
+        if active is not None and active.locked_price_gpu is not None
+        else None
+    )
     return PricingRecommendation(
         machine_id=machine.id,
         vast_machine_id=machine.machine_id,
         gpu_name=machine.gpu_name,
         num_gpus=n,
         current_price_gpu=_round6(current),
+        is_rented=active is not None,
+        locked_price_gpu=_round6(locked),
         **core,
     )
 
@@ -263,11 +275,15 @@ def recommend_for_simulated_host(
         kwh_rate=kwh,
         fee_pct=fee,
     )
+    is_rented = host.rented_until is not None and host.rented_until > datetime.now(UTC)
+    locked = float(host.locked_price_gpu) if is_rented and host.locked_price_gpu is not None else None
     return SimulatedPricingRecommendation(
         host_id=host.id,
         gpu_name=host.gpu_name,
         num_gpus=n,
         current_price_gpu=_round6(current),
+        is_rented=is_rented,
+        locked_price_gpu=_round6(locked),
         **core,
     )
 

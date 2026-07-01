@@ -9,15 +9,17 @@ import { toast } from 'sonner';
 import { PageHeader } from '@/components/page-header';
 import { Widget } from '@/components/widget';
 import { breakEvenFloor } from '@/lib/calc';
-import { dph, num, pct, relativeTime, usd } from '@/lib/format';
+import { dph, num, pct, relativeTime, untilTime, usd } from '@/lib/format';
 import {
   useDeleteSimulatedHost,
+  useEndSimulatedRental,
   useMarketMeta,
   useRunAutopilotStep,
   useSaveSimulatedHost,
   useSimulatedHostMarket,
   useSimulatedHosts,
   useSimulatedPriceHistory,
+  useStartSimulatedRental,
 } from '@/lib/hooks';
 
 type Draft = {
@@ -341,6 +343,7 @@ export default function SimulatorPage() {
                         </Button>
                       </div>
                     </CardContent>
+                    <RentalControlRow host={h} />
                     <SimMarketPanel host={h} />
                     <AutopilotHistory host={h} />
                   </Card>
@@ -473,6 +476,78 @@ function SimMarketPanel({ host }: { host: SimulatedHost }) {
             </tbody>
           </table>
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Phase 3 — lets a user simulate "this rig currently has an active rental" so
+// they can test Vast's real rule: a price change updates the asking price
+// immediately, but never retroactively changes an already-locked rental.
+function RentalControlRow({ host }: { host: SimulatedHost }) {
+  const start = useStartSimulatedRental();
+  const end = useEndSimulatedRental();
+  const [endsAt, setEndsAt] = useState('');
+
+  if (host.is_rented) {
+    const until = untilTime(host.rented_until);
+    return (
+      <div className="flex flex-wrap items-center gap-2 border-t border-border bg-bg/20 px-3 py-2 text-xs">
+        <Badge variant="accent">RENTED</Badge>
+        <span className="text-muted">
+          locked at {dph(host.locked_price_gpu)} · ends in {until.label}
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6"
+          disabled={end.isPending}
+          onClick={() =>
+            end.mutate(host.id, {
+              onSuccess: () => toast.success('Simulated rental ended'),
+              onError: (err) =>
+                toast.error(err instanceof Error ? err.message : 'Failed to end rental'),
+            })
+          }
+        >
+          End rental
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border bg-bg/20 px-3 py-2 text-xs">
+      <span className="text-muted">Simulate an active rental until</span>
+      <Input
+        type="datetime-local"
+        className="h-7 w-auto"
+        value={endsAt}
+        onChange={(e) => setEndsAt(e.target.value)}
+      />
+      <Button
+        size="sm"
+        variant="secondary"
+        className="h-7"
+        disabled={start.isPending || !endsAt || host.current_price_gpu == null}
+        onClick={() =>
+          start.mutate(
+            { hostId: host.id, endsAt: new Date(endsAt).toISOString() },
+            {
+              onSuccess: () => {
+                toast.success('Simulated rental started — current price is now locked');
+                setEndsAt('');
+              },
+              onError: (err) =>
+                toast.error(err instanceof Error ? err.message : 'Failed to start rental'),
+            },
+          )
+        }
+      >
+        Start
+      </Button>
+      {host.current_price_gpu == null ? (
+        <span className="text-muted">(set an asking price first)</span>
       ) : null}
     </div>
   );

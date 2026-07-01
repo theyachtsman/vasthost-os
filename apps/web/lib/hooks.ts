@@ -3,6 +3,7 @@ import {
   type AdminOut,
   type AutopilotStepResult,
   type AvailableClass,
+  type BulkApplyResult,
   type ClearingEvent,
   type DailyEarningPoint,
   type Distribution,
@@ -356,6 +357,19 @@ export const useApplyPrice = () => {
   });
 };
 
+// Offer Management — bulk price ops.
+export const useBulkApplyPrice = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (machineIds: string[]) =>
+      api.post<BulkApplyResult>('/pricing/bulk-apply', { machine_ids: machineIds }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pricing-recommendations'] });
+      qc.invalidateQueries({ queryKey: ['machines'] });
+    },
+  });
+};
+
 // ── Simulator ──────────────────────────────────────────────────
 export const useSimulatedHosts = (enabled = true) =>
   useQuery({
@@ -430,6 +444,32 @@ export const useApplySimulatedPrice = () => {
   });
 };
 
+// Offer Management sandbox — bulk-apply each selected rig's own recommended price.
+export const useBulkApplySimulatedPrice = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (hostIds: string[]) =>
+      api.post<BulkApplyResult>('/simulator/hosts/bulk-apply-recommended', { host_ids: hostIds }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['simulated-hosts'] });
+      qc.invalidateQueries({ queryKey: ['sim-pricing-recommendation'] });
+    },
+  });
+};
+
+// Same query as useSimulatedPricingRecommendation, one per host — shares cache
+// entries so the bulk-ops table (Offer Management sandbox) doesn't duplicate
+// requests made by per-host cards using the singular hook.
+export const useSimulatedHostsPricingRecommendations = (hosts: SimulatedHost[]) =>
+  useQueries({
+    queries: hosts.map((h) => ({
+      queryKey: ['sim-pricing-recommendation', h.id],
+      queryFn: () =>
+        api.get<SimulatedPricingRecommendation>(`/simulator/hosts/${h.id}/pricing-recommendation`),
+      refetchInterval: 60_000,
+    })),
+  });
+
 // Phase 2 — bounded auto-repricing.
 export const useSimulatedPriceHistory = (hostId: string | null) =>
   useQuery({
@@ -447,6 +487,34 @@ export const useRunAutopilotStep = () => {
       qc.invalidateQueries({ queryKey: ['sim-pricing-recommendation', hostId] });
       qc.invalidateQueries({ queryKey: ['simulated-hosts'] });
       qc.invalidateQueries({ queryKey: ['sim-price-history', hostId] });
+    },
+  });
+};
+
+// Phase 3 — rental-aware pricing sandbox: simulate "this rig currently has an
+// active rental" so a price change can be tested against Vast's real lock
+// behavior (asking price updates immediately; locked price doesn't, until the
+// rental ends).
+export const useStartSimulatedRental = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ hostId, endsAt }: { hostId: string; endsAt: string }) =>
+      api.post<SimulatedHost>(`/simulator/hosts/${hostId}/simulate-rental`, { ends_at: endsAt }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['simulated-hosts'] });
+      qc.invalidateQueries({ queryKey: ['sim-pricing-recommendation', vars.hostId] });
+    },
+  });
+};
+
+export const useEndSimulatedRental = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (hostId: string) =>
+      api.post<SimulatedHost>(`/simulator/hosts/${hostId}/end-rental`),
+    onSuccess: (_data, hostId) => {
+      qc.invalidateQueries({ queryKey: ['simulated-hosts'] });
+      qc.invalidateQueries({ queryKey: ['sim-pricing-recommendation', hostId] });
     },
   });
 };

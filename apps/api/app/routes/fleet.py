@@ -38,12 +38,32 @@ def list_machines(
     key_ids = _user_key_ids(db, user)
     if not key_ids:
         return []
-    machines = db.scalars(
-        select(HostMachine)
-        .where(HostMachine.user_provider_key_id.in_(key_ids))
-        .order_by(HostMachine.machine_id)
+    machines = list(
+        db.scalars(
+            select(HostMachine)
+            .where(HostMachine.user_provider_key_id.in_(key_ids))
+            .order_by(HostMachine.machine_id)
+        )
     )
-    return [MachineOut.model_validate(m) for m in machines]
+    machine_ids = [m.id for m in machines]
+    locked_by_machine: dict[uuid.UUID, float] = {}
+    if machine_ids:
+        rows = db.execute(
+            select(RentalContract.machine_id, RentalContract.locked_price_gpu).where(
+                RentalContract.machine_id.in_(machine_ids),
+                RentalContract.status == "active",
+            )
+        )
+        for mid, price in rows:
+            if price is not None:
+                locked_by_machine[mid] = float(price)
+
+    out = []
+    for m in machines:
+        o = MachineOut.model_validate(m)
+        o.active_locked_price_gpu = locked_by_machine.get(m.id)
+        out.append(o)
+    return out
 
 
 @router.get("/machines/{machine_id}", response_model=MachineDetail)

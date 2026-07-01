@@ -143,6 +143,12 @@ function RecoCard({ reco }: { reco: PricingRecommendation }) {
             ) : null}
           </div>
           <p className="mt-0.5 max-w-2xl text-[11px] text-muted">{reco.rationale}</p>
+          {reco.is_rented ? (
+            <p className="mt-0.5 text-[11px] text-accent">
+              Renting now at {dph(reco.locked_price_gpu)} (locked) — applying a new price updates
+              your asking price immediately but only takes effect for the next rental.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-4">
@@ -408,6 +414,13 @@ function SimRecoCard({ host }: { host: SimulatedHost }) {
               Autopilot is managing this rig&rsquo;s price automatically (~every 15 min, bounded
               by its rails in Simulator). Manual apply below still works — the next automated
               step continues from wherever you leave it.
+            </p>
+          ) : null}
+          {reco.is_rented ? (
+            <p className="mt-0.5 text-[11px] text-accent">
+              Simulated as renting now at {dph(reco.locked_price_gpu)} (locked) — applying a new
+              price updates the asking price immediately, matching Vast, but only takes effect
+              for the next rental. Manage this in Simulator.
             </p>
           ) : null}
         </div>

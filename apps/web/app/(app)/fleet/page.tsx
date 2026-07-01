@@ -148,6 +148,15 @@ function MachineCard({
           />
         </div>
 
+        {machine.active_locked_price_gpu != null ? (
+          <div className="rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5 text-[11px] text-accent">
+            Renting now at {dph(machine.active_locked_price_gpu)} (locked)
+            {machine.active_locked_price_gpu !== machine.current_price_gpu
+              ? ' — your asking price change applies to the next rental'
+              : ''}
+          </div>
+        ) : null}
+
         <div className="flex items-center justify-between border-t border-border pt-2 text-xs">
           <span className={expiry.soon ? 'text-amber-400' : 'text-muted'}>
             Offer ends in {expiry.label}

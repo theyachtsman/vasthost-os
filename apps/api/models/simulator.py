@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Integer, Numeric, String
+from sqlalchemy import Boolean, DateTime, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -38,6 +38,14 @@ class SimulatedHost(Base):
     )
     min_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
     max_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    # Simulates Vast's real rental-lock behavior: a price change always updates
+    # current_price_gpu (the asking price) immediately — same as on Vast — but
+    # while rented_until is in the future, locked_price_gpu is what the
+    # (simulated) active renter is paying and is untouched by later price
+    # changes, exactly like RentalContract.locked_price_gpu on a real machine.
+    # Set together via POST .../simulate-rental, cleared via .../end-rental.
+    rented_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # Distinguishes sandbox rigs from real per-user machines once they land via
     # user_provider_keys. Fleet surfaces must never blend the two silently.

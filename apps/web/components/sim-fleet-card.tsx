@@ -83,6 +83,15 @@ export function SimFleetCard({ host }: { host: SimulatedHost }) {
           </div>
         </div>
 
+        {host.is_rented ? (
+          <div className="rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5 text-[11px] text-accent">
+            Renting now at {dph(host.locked_price_gpu)} (locked)
+            {host.locked_price_gpu !== host.current_price_gpu
+              ? ' — asking price change applies to the next rental'
+              : ''}
+          </div>
+        ) : null}
+
         {p50Proj ? (
           <div className="flex items-center justify-between rounded-md border border-border bg-bg/40 px-3 py-2 text-xs">
             <span className="text-muted">Projected net @ p50</span>

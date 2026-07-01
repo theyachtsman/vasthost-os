@@ -63,6 +63,10 @@ class MachineOut(ORMModel):
     min_bid_price: float | None
     offer_end_date: datetime | None
     last_seen_at: datetime | None
+    # Locked price of the active rental contract, if any (None when idle). A
+    # price change updates current_price_gpu (the asking price) immediately —
+    # same as Vast — but this stays fixed until the active rental ends.
+    active_locked_price_gpu: float | None = None
 
 
 class ContractOut(ORMModel):
@@ -256,6 +260,12 @@ class SimulatedHostIn(BaseModel):
     autopilot_enabled: bool = False
     min_price_gpu: float | None = None
     max_price_gpu: float | None = None
+    # Mirrors RentalContract on a real machine: set together via
+    # POST .../simulate-rental, cleared via .../end-rental. Round-trips through
+    # a normal config save like current_price_gpu — same "spread the fetched
+    # host" rule applies.
+    rented_until: datetime | None = None
+    locked_price_gpu: float | None = None
 
 
 class SimulatedHostOut(SimulatedHostIn, ORMModel):
@@ -263,6 +273,9 @@ class SimulatedHostOut(SimulatedHostIn, ORMModel):
     is_simulated: bool = True
     created_at: datetime
     break_even_floor: float | None = None
+    # Computed: rented_until is in the future. Lets the frontend badge "renting
+    # now" without redoing the now() comparison itself.
+    is_rented: bool = False
 
 
 # ── Simulator × live market projection ─────────────────────────
@@ -316,6 +329,11 @@ class PricingRecommendation(BaseModel):
     has_market_data: bool
     has_power_cost: bool  # kwh_rate set → break-even floor is known
     rationale: str
+    # A price change updates current_price_gpu (the asking price) immediately —
+    # same as Vast — but if is_rented, locked_price_gpu is what the active
+    # rental is actually paying and won't change until it ends.
+    is_rented: bool = False
+    locked_price_gpu: float | None = None
 
 
 # Simulated-rig counterpart of PricingRecommendation — same demand-adaptive math
@@ -341,10 +359,18 @@ class SimulatedPricingRecommendation(BaseModel):
     has_market_data: bool
     has_power_cost: bool
     rationale: str
+    is_rented: bool = False
+    locked_price_gpu: float | None = None
 
 
 class SimulatedPriceApplyIn(BaseModel):
     new_price_gpu: float = Field(gt=0)
+
+
+# Phase 3 (rental-aware pricing) — simulate "this rig currently has an active
+# rental" so a price change can be tested against Vast's real lock behavior.
+class SimulateRentalIn(BaseModel):
+    ends_at: datetime
 
 
 # Phase 2 — result of one autopilot evaluation (scheduled or manually triggered).
@@ -360,6 +386,34 @@ class PriceApplyIn(BaseModel):
     machine_id: uuid.UUID
     new_price_gpu: float = Field(gt=0)
     reason: str = "recommend_applied"  # 'recommend_applied' | 'manual'
+
+
+# ── Offer Management — bulk price ops ───────────────────────────
+# Applies each selected machine/rig's own current recommended price in one
+# pass — the same demand-adaptive recommendation Pricing Control shows,
+# batched. Shared shape for both real machines and simulated rigs.
+class BulkApplyIn(BaseModel):
+    machine_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+
+class SimulatedBulkApplyIn(BaseModel):
+    host_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+
+class BulkApplyResultItem(BaseModel):
+    id: uuid.UUID
+    label: str
+    status: str  # applied | skipped_floor | skipped_no_market | failed
+    old_price_gpu: float | None
+    new_price_gpu: float | None
+    detail: str | None = None
+
+
+class BulkApplyResult(BaseModel):
+    applied: int
+    skipped: int
+    failed: int
+    items: list[BulkApplyResultItem]
 
 
 class PriceChangeEventOut(ORMModel):
