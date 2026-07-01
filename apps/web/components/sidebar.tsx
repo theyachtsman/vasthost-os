@@ -30,7 +30,7 @@ const SURFACES: NavItem[] = [
   { href: '/market', label: 'Market Intelligence', icon: LineChart },
   { href: '/earnings', label: 'Earnings & Financials', icon: DollarSign },
   { href: '/fleet', label: 'Fleet Health', icon: Server },
-  { href: '/pricing', label: 'Pricing Control', icon: Tag, soon: true },
+  { href: '/pricing', label: 'Pricing Control', icon: Tag },
   { href: '/offers', label: 'Offer Management', icon: Boxes, soon: true },
   { href: '/analytics', label: 'Analytics & Insights', icon: BarChart3, soon: true },
   { href: '/alerting', label: 'Alerting', icon: Bell },

@@ -14,13 +14,16 @@ import {
   type MachineDetail,
   type ObserverStatus,
   type PlatformKey,
+  type PriceChangeEvent,
+  type PricingRecommendation,
   type SimulatedHost,
   type SimulatedHostMarketContext,
+  type SimulatedPricingRecommendation,
   type UserOut,
   type UserProviderKey,
   type WatchedClass,
 } from '@vasthost/shared-types';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { ApiError, api } from './api';
 
@@ -324,6 +327,34 @@ export const useRemoveWatchedClass = () => {
   });
 };
 
+// ── Pricing Control (Phase 1) ──────────────────────────────────
+export const usePricingRecommendations = () =>
+  useQuery({
+    queryKey: ['pricing-recommendations'],
+    queryFn: () => api.get<PricingRecommendation[]>('/pricing/recommendations'),
+    refetchInterval: 60_000,
+  });
+
+export const usePriceHistory = (machineId: string | null) =>
+  useQuery({
+    queryKey: ['price-history', machineId],
+    queryFn: () => api.get<PriceChangeEvent[]>(`/pricing/history?machine_id=${machineId}`),
+    enabled: !!machineId,
+  });
+
+export const useApplyPrice = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { machine_id: string; new_price_gpu: number; reason?: string }) =>
+      api.post<PriceChangeEvent>('/pricing/apply', body),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['pricing-recommendations'] });
+      qc.invalidateQueries({ queryKey: ['machines'] });
+      qc.invalidateQueries({ queryKey: ['price-history', vars.machine_id] });
+    },
+  });
+};
+
 // ── Simulator ──────────────────────────────────────────────────
 export const useSimulatedHosts = (enabled = true) =>
   useQuery({
@@ -357,3 +388,42 @@ export const useSimulatedHostMarket = (id: string) =>
     queryFn: () => api.get<SimulatedHostMarketContext>(`/simulator/hosts/${id}/market-context`),
     refetchInterval: 60_000,
   });
+
+// Same query as useSimulatedHostMarket, one per host — shares its cache entries
+// (identical queryKey) so surfaces that need an aggregate (e.g. Earnings) don't
+// duplicate requests made by per-host cards/rows using the singular hook.
+export const useSimulatedHostsMarket = (hosts: SimulatedHost[]) =>
+  useQueries({
+    queries: hosts.map((h) => ({
+      queryKey: ['sim-market', h.id],
+      queryFn: () => api.get<SimulatedHostMarketContext>(`/simulator/hosts/${h.id}/market-context`),
+      refetchInterval: 60_000,
+    })),
+  });
+
+// Pricing Control's sandbox — same demand-adaptive recommendation as
+// usePricingRecommendations, run against a simulated rig instead of a real
+// machine so users can test the feature before hosting anything.
+export const useSimulatedPricingRecommendation = (hostId: string) =>
+  useQuery({
+    queryKey: ['sim-pricing-recommendation', hostId],
+    queryFn: () =>
+      api.get<SimulatedPricingRecommendation>(
+        `/simulator/hosts/${hostId}/pricing-recommendation`,
+      ),
+    refetchInterval: 60_000,
+  });
+
+export const useApplySimulatedPrice = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ hostId, newPriceGpu }: { hostId: string; newPriceGpu: number }) =>
+      api.post<SimulatedPricingRecommendation>(`/simulator/hosts/${hostId}/apply-price`, {
+        new_price_gpu: newPriceGpu,
+      }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['sim-pricing-recommendation', vars.hostId] });
+      qc.invalidateQueries({ queryKey: ['simulated-hosts'] });
+    },
+  });
+};

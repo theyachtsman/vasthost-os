@@ -27,6 +27,9 @@ class SimulatedHost(Base):
     vast_service_fee_pct: Mapped[float] = mapped_column(
         Numeric(5, 4), default=0.20, server_default="0.20"
     )
+    # Sandbox "asking price" — set via the Pricing Control apply-price route (local
+    # only, no Vast write). Null until the user applies a recommendation or sets one.
+    current_price_gpu: Mapped[float | None] = mapped_column(Numeric(10, 6))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # Distinguishes sandbox rigs from real per-user machines once they land via
     # user_provider_keys. Fleet surfaces must never blend the two silently.

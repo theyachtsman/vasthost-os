@@ -12,6 +12,7 @@ from .routes import (
     fleet,
     health,
     market,
+    pricing,
     provider_keys,
     simulator,
 )
@@ -52,6 +53,7 @@ app.include_router(provider_keys.router, prefix="/me", tags=["me"])
 app.include_router(fleet.router, prefix="/fleet", tags=["fleet"])
 app.include_router(earnings.router, prefix="/earnings", tags=["earnings"])
 app.include_router(simulator.router, prefix="/simulator", tags=["simulator"])
+app.include_router(pricing.router, prefix="/pricing", tags=["pricing"])
 
 # Note: the legacy single-account /account/* routes are removed — the two-key
 # model supersedes them entirely (see /me/provider-keys and /admin/platform-keys).

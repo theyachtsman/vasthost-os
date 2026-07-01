@@ -14,6 +14,8 @@ export function SimFleetCard({ host }: { host: SimulatedHost }) {
   const p50 = market?.p50_price ?? null;
   const breakEven = market?.break_even_floor ?? host.break_even_floor;
   const p50Proj = market?.projections.find((p) => p.label === 'p50');
+  const delta =
+    host.current_price_gpu != null && p50 != null ? host.current_price_gpu - p50 : null;
 
   return (
     <Card className="border-accent/30">
@@ -33,6 +35,22 @@ export function SimFleetCard({ host }: { host: SimulatedHost }) {
 
         <div className="grid grid-cols-2 gap-3">
           <Stat
+            label="Asking price"
+            value={dph(host.current_price_gpu)}
+            sub={
+              host.current_price_gpu == null ? (
+                'not set — see Pricing Control'
+              ) : delta != null ? (
+                <span className={delta >= 0 ? 'text-emerald-400' : 'text-amber-400'}>
+                  {delta >= 0 ? '+' : ''}
+                  {dph(delta)} vs p50
+                </span>
+              ) : (
+                'no market ref'
+              )
+            }
+          />
+          <Stat
             label="Break-even"
             value={dph(breakEven)}
             sub={
@@ -41,18 +59,13 @@ export function SimFleetCard({ host }: { host: SimulatedHost }) {
                 : 'power floor'
             }
           />
-          <Stat
-            label="Market p50"
-            value={dph(p50)}
-            sub={
-              market?.market_bucket_num_gpus != null
-                ? `per-GPU · ${market.supply_count ?? 0} offers`
-                : 'no market yet'
-            }
-          />
         </div>
 
-        <div className="grid grid-cols-3 gap-2 border-t border-border pt-2 text-xs">
+        <div className="grid grid-cols-4 gap-2 border-t border-border pt-2 text-xs">
+          <div>
+            <div className="text-[10px] uppercase text-muted">Market p50</div>
+            <div className="tabular-nums text-fg">{dph(p50)}</div>
+          </div>
           <div>
             <div className="text-[10px] uppercase text-muted">Reliability</div>
             <div className="tabular-nums text-fg">{(host.reliability * 100).toFixed(1)}%</div>

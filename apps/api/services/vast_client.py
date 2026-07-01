@@ -140,3 +140,49 @@ class VastClient:
         if isinstance(result, dict):
             return result.get("offers", []) or []
         return result or []
+
+    # ── Pricing (write) ────────────────────────────────────────
+    def show_machine(self, machine_id: int) -> dict[str, Any]:
+        """Fetch one machine's current state (used to read live offer params
+        before a reprice, so we never clobber disk/bandwidth pricing)."""
+        result = self._call("show_machine", id=int(machine_id))
+        if isinstance(result, dict):
+            return result
+        return {}
+
+    def set_machine_price(self, machine_id: int, price_gpu: float) -> dict[str, Any]:
+        """Re-list a machine at a new per-GPU on-demand price.
+
+        Vast's ``list_machine`` re-creates the machine's offers from the params it
+        receives, so we do a READ-MODIFY-WRITE: read the machine's current
+        disk/bandwidth/min_chunk/end_date and re-supply them, changing only
+        ``price_gpu``. Otherwise a reprice would silently wipe storage/bandwidth
+        pricing. ``price_gpu`` is per-GPU $/hr (Vast's native unit here).
+        """
+        mid = int(machine_id)
+        current = self.show_machine(mid)
+
+        def _num(*keys: str) -> float | None:
+            for k in keys:
+                v = current.get(k)
+                if v is not None:
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return None
+            return None
+
+        kwargs: dict[str, Any] = {"id": mid, "price_gpu": float(price_gpu)}
+        # Preserve the rest of the offer exactly as it stands today.
+        preserved = {
+            "price_disk": _num("listed_storage_cost", "storage_cost", "price_disk"),
+            "price_inetu": _num("inet_up_cost", "price_inetu"),
+            "price_inetd": _num("inet_down_cost", "price_inetd"),
+            "price_min_bid": _num("min_bid_price", "listed_min_bid", "min_bid"),
+            "min_chunk": current.get("min_chunk"),
+            "end_date": current.get("end_date"),
+        }
+        for k, v in preserved.items():
+            if v is not None:
+                kwargs[k] = v
+        return self._call("list_machine", **kwargs)

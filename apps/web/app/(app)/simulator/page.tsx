@@ -2,7 +2,7 @@
 
 import type { SimulatedHost } from '@vasthost/shared-types';
 import { Badge, Button, Card, CardContent, DataState, Input, Label } from '@vasthost/ui';
-import { Trash2 } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -19,6 +19,7 @@ import {
 } from '@/lib/hooks';
 
 type Draft = {
+  id?: string;
   name: string;
   gpu_name: string;
   num_gpus: number;
@@ -29,6 +30,8 @@ type Draft = {
   geolocation: string;
   kwh_rate: number;
   vast_service_fee_pct: number;
+  // Raw text, not a number — blank means "unset" (distinct from 0).
+  current_price_gpu: string;
 };
 
 const EMPTY: Draft = {
@@ -44,17 +47,37 @@ const EMPTY: Draft = {
   // Pre-meta placeholder; replaced by the platform default (MARKET_FEE_PCT) once
   // /market/meta loads, unless the user overrides it.
   vast_service_fee_pct: 0.25,
+  current_price_gpu: '',
 };
+
+function draftFromHost(host: SimulatedHost): Draft {
+  return {
+    id: host.id,
+    name: host.name ?? '',
+    gpu_name: host.gpu_name ?? '',
+    num_gpus: host.num_gpus ?? 1,
+    gpu_ram_mb: host.gpu_ram_mb ?? 0,
+    gpu_max_power_w: host.gpu_max_power_w ?? 0,
+    verified: host.verified,
+    reliability: host.reliability,
+    geolocation: host.geolocation ?? '',
+    kwh_rate: host.kwh_rate ?? 0,
+    vast_service_fee_pct: host.vast_service_fee_pct,
+    current_price_gpu: host.current_price_gpu != null ? String(host.current_price_gpu) : '',
+  };
+}
 
 export default function SimulatorPage() {
   const hosts = useSimulatedHosts();
   const save = useSaveSimulatedHost();
   const del = useDeleteSimulatedHost();
   const [draft, setDraft] = useState<Draft>(EMPTY);
+  const editing = draft.id != null;
 
   // Seed the per-rig fee from the platform default (MARKET_FEE_PCT, exposed via
   // /market/meta) so there's a single source of truth — until the user overrides
-  // it. Per-rig override stays a feature.
+  // it. Per-rig override stays a feature. Marking feeTouched on edit-load stops
+  // this from clobbering a rig's own already-set fee.
   const platformFee = useMarketMeta().data?.fee_pct ?? null;
   const feeTouched = useRef(false);
   useEffect(() => {
@@ -74,12 +97,37 @@ export default function SimulatorPage() {
       setDraft((d) => ({ ...d, [key]: numeric ? Number(raw) : raw }) as Draft);
     };
 
+  const startEdit = (host: SimulatedHost) => {
+    feeTouched.current = true;
+    setDraft(draftFromHost(host));
+  };
+
+  const cancelEdit = () => {
+    feeTouched.current = false;
+    setDraft(EMPTY);
+  };
+
   const submit = () => {
+    const priceRaw = draft.current_price_gpu.trim();
     save.mutate(
-      { ...draft, geolocation: draft.geolocation || null },
+      {
+        id: draft.id,
+        name: draft.name,
+        gpu_name: draft.gpu_name,
+        num_gpus: draft.num_gpus,
+        gpu_ram_mb: draft.gpu_ram_mb,
+        gpu_max_power_w: draft.gpu_max_power_w,
+        verified: draft.verified,
+        reliability: draft.reliability,
+        geolocation: draft.geolocation || null,
+        kwh_rate: draft.kwh_rate,
+        vast_service_fee_pct: draft.vast_service_fee_pct,
+        current_price_gpu: priceRaw === '' ? null : Number(priceRaw),
+      },
       {
         onSuccess: () => {
-          toast.success('Simulated host saved');
+          toast.success(editing ? 'Simulated host updated' : 'Simulated host saved');
+          feeTouched.current = false;
           setDraft(EMPTY);
         },
         onError: (err) => toast.error(err instanceof Error ? err.message : 'Save failed'),
@@ -91,10 +139,10 @@ export default function SimulatorPage() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Simulator"
-        description="Define synthetic host configs for sandbox testing. Config only in Phase 0 — no pricing actions yet."
+        description="Define synthetic host configs for sandbox testing — including the rig's asking price, which Pricing Control can recommend against and update."
       />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Widget title="New Config">
+        <Widget title={editing ? `Edit — ${draft.name || draft.gpu_name || 'rig'}` : 'New Config'}>
           <div className="grid grid-cols-2 gap-3 pt-1">
             <Field label="Name"><Input value={draft.name} onChange={set('name')} /></Field>
             <Field label="GPU name"><Input value={draft.gpu_name} onChange={set('gpu_name')} /></Field>
@@ -123,6 +171,15 @@ export default function SimulatorPage() {
                 onChange={set('vast_service_fee_pct')}
               />
             </Field>
+            <Field label="Current price ($/GPU·hr)">
+              <Input
+                type="number"
+                step="0.001"
+                placeholder="unset — Pricing Control can set this"
+                value={draft.current_price_gpu}
+                onChange={set('current_price_gpu')}
+              />
+            </Field>
           </div>
 
           <div className="mt-4 flex items-center justify-between rounded-md border border-border bg-bg/40 p-3">
@@ -134,9 +191,16 @@ export default function SimulatorPage() {
                 platform fee (estimate)
               </div>
             </div>
-            <Button onClick={submit} disabled={save.isPending}>
-              Save config
-            </Button>
+            <div className="flex items-center gap-2">
+              {editing ? (
+                <Button variant="ghost" onClick={cancelEdit}>
+                  Cancel
+                </Button>
+              ) : null}
+              <Button onClick={submit} disabled={save.isPending}>
+                {editing ? 'Save changes' : 'Save config'}
+              </Button>
+            </div>
           </div>
         </Widget>
 
@@ -153,7 +217,10 @@ export default function SimulatorPage() {
             {(rows) => (
               <div className="flex flex-col gap-2 pt-1">
                 {rows.map((h: SimulatedHost) => (
-                  <Card key={h.id} className="border-border/70">
+                  <Card
+                    key={h.id}
+                    className={h.id === draft.id ? 'border-accent/50' : 'border-border/70'}
+                  >
                     <CardContent className="flex items-center justify-between gap-3 p-3">
                       <div>
                         <div className="flex items-center gap-2">
@@ -165,6 +232,12 @@ export default function SimulatorPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <div className="text-[10px] uppercase text-muted">Asking price</div>
+                          <div className="text-sm font-semibold tabular-nums text-fg">
+                            {h.current_price_gpu != null ? dph(h.current_price_gpu) : '—'}
+                          </div>
+                        </div>
                         <div className="text-right">
                           <div
                             className="text-[10px] uppercase text-muted"
@@ -179,10 +252,21 @@ export default function SimulatorPage() {
                         <Button
                           size="icon"
                           variant="ghost"
+                          aria-label="Edit config"
+                          onClick={() => startEdit(h)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
                           aria-label="Delete config"
                           onClick={() =>
                             del.mutate(h.id, {
-                              onSuccess: () => toast.success('Deleted'),
+                              onSuccess: () => {
+                                toast.success('Deleted');
+                                if (h.id === draft.id) cancelEdit();
+                              },
                             })
                           }
                         >
@@ -268,6 +352,15 @@ function SimMarketPanel({ host }: { host: SimulatedHost }) {
             {dph(d.break_even_floor)}
           </div>
         </div>
+      </div>
+
+      <div className="flex items-center justify-between rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5 text-xs">
+        <span className="text-muted">Your ask</span>
+        <span className="font-semibold tabular-nums text-accent">
+          {host.current_price_gpu != null
+            ? dph(host.current_price_gpu)
+            : 'not set — see Pricing Control'}
+        </span>
       </div>
 
       <p className="text-[11px] text-muted">

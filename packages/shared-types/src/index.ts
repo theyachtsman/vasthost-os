@@ -208,6 +208,7 @@ export interface SimulatedHost {
   is_simulated: boolean;
   created_at: string;
   break_even_floor: number | null;
+  current_price_gpu: number | null;
 }
 
 export interface WatchedClass {
@@ -269,6 +270,64 @@ export interface MarketOverviewRow {
   dlperf_per_dphtotal: number | null;
   price_basis?: 'ask' | 'last-rented';
   computed_at: string;
+}
+
+export interface PricingRecommendation {
+  machine_id: string;
+  vast_machine_id: number;
+  gpu_name: string | null;
+  num_gpus: number | null;
+  current_price_gpu: number | null;
+  recommended_price_gpu: number | null;
+  target_percentile: number | null;
+  current_percentile: number | null;
+  break_even_floor: number | null;
+  floored: boolean;
+  demand_label: string | null;
+  utilization_pct: number | null;
+  market_bucket_num_gpus: number | null;
+  market_computed_at: string | null;
+  market_dist_id: number | null;
+  supply_count: number | null;
+  has_market_data: boolean;
+  has_power_cost: boolean;
+  rationale: string;
+}
+
+// Simulated-rig counterpart of PricingRecommendation — same demand-adaptive
+// fields, swapping machine_id/vast_machine_id for a sim host_id.
+export interface SimulatedPricingRecommendation {
+  host_id: string;
+  gpu_name: string | null;
+  num_gpus: number | null;
+  current_price_gpu: number | null;
+  recommended_price_gpu: number | null;
+  target_percentile: number | null;
+  current_percentile: number | null;
+  break_even_floor: number | null;
+  floored: boolean;
+  demand_label: string | null;
+  utilization_pct: number | null;
+  market_bucket_num_gpus: number | null;
+  market_computed_at: string | null;
+  market_dist_id: number | null;
+  supply_count: number | null;
+  has_market_data: boolean;
+  has_power_cost: boolean;
+  rationale: string;
+}
+
+export interface PriceChangeEvent {
+  id: string;
+  changed_at: string;
+  machine_id: string;
+  old_price_gpu: number | null;
+  new_price_gpu: number | null;
+  reason: string | null;
+  market_percentile: number | null;
+  applied_to_vast: boolean;
+  applied_at: string | null;
+  error_message: string | null;
 }
 
 export interface ProjectionPoint {

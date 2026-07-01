@@ -245,6 +245,11 @@ class SimulatedHostIn(BaseModel):
     # constant (MARKET_FEE_PCT) so all break-even math shares one source of truth.
     vast_service_fee_pct: float = Field(default_factory=lambda: settings.MARKET_FEE_PCT)
     is_active: bool = True
+    # The rig's asking price — hand-edited from the Simulator config form, or set
+    # by Pricing Control's apply-price route when the user applies a recommendation.
+    # Editing/saving a config round-trips whatever value is currently loaded, so
+    # neither path clobbers the other as long as callers spread the fetched host.
+    current_price_gpu: float | None = None
 
 
 class SimulatedHostOut(SimulatedHostIn, ORMModel):
@@ -282,6 +287,77 @@ class SimulatedHostMarketContext(BaseModel):
     break_even_percentile: float | None  # where break-even sits in the market
     has_market_data: bool
     projections: list[ProjectionPoint]
+
+
+# ── Pricing Control Center (Phase 1 — recommend-only) ──────────
+class PricingRecommendation(BaseModel):
+    machine_id: uuid.UUID
+    vast_machine_id: int
+    gpu_name: str | None
+    num_gpus: int | None
+    current_price_gpu: float | None
+    recommended_price_gpu: float | None
+    target_percentile: float | None  # market percentile the reco aims at
+    current_percentile: float | None  # where the host's current price sits today
+    break_even_floor: float | None
+    floored: bool  # recommendation was raised up to the break-even floor
+    demand_label: str | None  # Hot | Warm | Soft | Cold
+    utilization_pct: float | None
+    market_bucket_num_gpus: int | None  # which distribution bucket was used
+    market_computed_at: datetime | None
+    market_dist_id: int | None
+    supply_count: int | None
+    has_market_data: bool
+    has_power_cost: bool  # kwh_rate set → break-even floor is known
+    rationale: str
+
+
+# Simulated-rig counterpart of PricingRecommendation — same demand-adaptive math
+# (see services.pricing._recommend_core), swapping the Vast-specific identity
+# fields (machine_id/vast_machine_id) for a sim host_id. Lets users exercise
+# Pricing Control before they have a real machine to recommend for.
+class SimulatedPricingRecommendation(BaseModel):
+    host_id: uuid.UUID
+    gpu_name: str | None
+    num_gpus: int | None
+    current_price_gpu: float | None
+    recommended_price_gpu: float | None
+    target_percentile: float | None
+    current_percentile: float | None
+    break_even_floor: float | None
+    floored: bool
+    demand_label: str | None
+    utilization_pct: float | None
+    market_bucket_num_gpus: int | None
+    market_computed_at: datetime | None
+    market_dist_id: int | None
+    supply_count: int | None
+    has_market_data: bool
+    has_power_cost: bool
+    rationale: str
+
+
+class SimulatedPriceApplyIn(BaseModel):
+    new_price_gpu: float = Field(gt=0)
+
+
+class PriceApplyIn(BaseModel):
+    machine_id: uuid.UUID
+    new_price_gpu: float = Field(gt=0)
+    reason: str = "recommend_applied"  # 'recommend_applied' | 'manual'
+
+
+class PriceChangeEventOut(ORMModel):
+    id: uuid.UUID
+    changed_at: datetime
+    machine_id: uuid.UUID
+    old_price_gpu: float | None
+    new_price_gpu: float | None
+    reason: str | None
+    market_percentile: float | None
+    applied_to_vast: bool
+    applied_at: datetime | None
+    error_message: str | None
 
 
 # ── Cost config ────────────────────────────────────────────────

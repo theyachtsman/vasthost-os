@@ -12,7 +12,10 @@ from schemas.models import (
     SimulatedHostIn,
     SimulatedHostMarketContext,
     SimulatedHostOut,
+    SimulatedPriceApplyIn,
+    SimulatedPricingRecommendation,
 )
+from services import pricing as pricing_svc
 from services.calc import break_even_floor_per_gpu_hour, percentile_position
 
 from ..deps import require_user_session
@@ -212,3 +215,50 @@ def market_context(
         projections=projections,
         **base,
     )
+
+
+@router.get(
+    "/hosts/{host_id}/pricing-recommendation", response_model=SimulatedPricingRecommendation
+)
+def pricing_recommendation(
+    host_id: uuid.UUID,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> SimulatedPricingRecommendation:
+    """Pricing Control's sandbox: the same demand-adaptive recommendation math used
+    for real machines (services.pricing), run against a simulated rig so a user can
+    see how it behaves before they host anything for real."""
+    host = db.get(SimulatedHost, host_id)
+    if host is None:
+        raise HTTPException(status_code=404, detail="Simulated host not found")
+    return pricing_svc.recommend_for_simulated_host(db, host)
+
+
+@router.post("/hosts/{host_id}/apply-price", response_model=SimulatedPricingRecommendation)
+def apply_price(
+    host_id: uuid.UUID,
+    payload: SimulatedPriceApplyIn,
+    user: User = Depends(require_user_session),
+    db: Session = Depends(get_db),
+) -> SimulatedPricingRecommendation:
+    """Sandbox apply — updates the rig's local asking price only. No Vast write:
+    simulated rigs have no live listing to change. Still enforces the break-even
+    floor server-side, same safety net as the real apply route."""
+    host = db.get(SimulatedHost, host_id)
+    if host is None:
+        raise HTTPException(status_code=404, detail="Simulated host not found")
+
+    reco = pricing_svc.recommend_for_simulated_host(db, host)
+    if reco.break_even_floor is not None and payload.new_price_gpu < reco.break_even_floor:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Price ${payload.new_price_gpu:.4f} is below your break-even floor "
+                f"${reco.break_even_floor:.4f}/GPU·hr."
+            ),
+        )
+
+    host.current_price_gpu = payload.new_price_gpu
+    db.commit()
+    db.refresh(host)
+    return pricing_svc.recommend_for_simulated_host(db, host)
